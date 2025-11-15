@@ -30,7 +30,7 @@
                 align-self: flex-start; 
             }
             
-            /* --- NEW CSS FOR THE SENDER'S NAME --- */
+            /* CSS FOR THE SENDER'S NAME */
             .message-other strong {
                 display: block; /* Makes it take its own line */
                 font-size: 0.9em;
@@ -83,7 +83,6 @@
 
                 ws = new WebSocket(`ws://${window.location.host}/ws/${clientName}`);
                 
-                // --- THIS FUNCTION IS COMPLETELY REWRITTEN ---
                 ws.onmessage = function(event) {
                     // Parse the incoming JSON string
                     var data = JSON.parse(event.data); 
@@ -118,7 +117,6 @@
                 };
             }
 
-            // This function is unchanged
             function sendMessage(event) {
                 event.preventDefault();
                 var input = document.getElementById("messageText");

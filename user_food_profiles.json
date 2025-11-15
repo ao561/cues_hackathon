@@ -1,0 +1,40 @@
+{
+  "Simon": {
+    "loved": [
+      "sushi"
+    ],
+    "liked": [
+      "pizza"
+    ],
+    "neutral": [],
+    "dislike": [],
+    "hated": []
+  },
+  "Toby": {
+    "loved": [],
+    "liked": [],
+    "neutral": [],
+    "dislike": [],
+    "hated": [
+      "sushi"
+    ]
+  },
+  "Apollo": {
+    "loved": [],
+    "liked": [
+      "steak"
+    ],
+    "neutral": [],
+    "dislike": [],
+    "hated": []
+  },
+  "Jon": {
+    "loved": [
+      "ramen"
+    ],
+    "liked": [],
+    "neutral": [],
+    "dislike": [],
+    "hated": []
+  }
+}
