@@ -1,7 +1,8 @@
 {
   "Simon": {
     "loved": [
-      "sushi"
+      "sushi",
+      "ramen"
     ],
     "liked": [
       "pizza"
@@ -10,30 +11,39 @@
     "dislike": [],
     "hated": []
   },
-  "Toby": {
-    "loved": [],
-    "liked": [],
-    "neutral": [],
-    "dislike": [],
-    "hated": [
-      "sushi"
-    ]
-  },
-  "Apollo": {
-    "loved": [],
-    "liked": [
-      "steak"
-    ],
-    "neutral": [],
-    "dislike": [],
-    "hated": []
-  },
-  "Jon": {
+  "Mahdi": {
     "loved": [
       "ramen"
     ],
     "liked": [],
     "neutral": [],
+    "dislike": [],
+    "hated": []
+  },
+  "Amaan": {
+    "loved": [],
+    "liked": [],
+    "neutral": [],
+    "dislike": [],
+    "hated": [
+      "ramen"
+    ]
+  },
+  "Hayyan": {
+    "loved": [],
+    "liked": [
+      "sushi"
+    ],
+    "neutral": [],
+    "dislike": [],
+    "hated": []
+  },
+  "Ardil": {
+    "loved": [],
+    "liked": [],
+    "neutral": [
+      "pizza"
+    ],
     "dislike": [],
     "hated": []
   }
