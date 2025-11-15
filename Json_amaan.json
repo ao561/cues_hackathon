@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "location-server": {
+      "command": "C:\\Users\\Ardil\\Documents\\cues_hackathon\\venv\\Scripts\\python.exe",
+      "args": [
+        "C:\\Users\\Ardil\\Documents\\cues_hackathon\\location_server.py"
+      ]
+    }
+  }
+}
