@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Chat</title>
+        <style>
+            body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; }
+            h1 { text-align: center; }
+            #messages { list-style-type: none; margin: 0; padding: 0 20px; overflow-y: auto; flex-grow: 1; }
+            #messages li { padding: 8px 12px; margin-bottom: 10px; border-radius: 8px; }
+            .message-self { background-color: #dcf8c6; align-self: flex-end; }
+            .message-other { background-color: #f1f0f0; align-self: flex-start; }
+            #form { display: flex; padding: 20px; background: #eee; }
+            #form input { border: 1px solid #ccc; padding: 10px; flex-grow: 1; border-radius: 20px; }
+            #form button { background: #007bff; color: white; border: none; padding: 10px 20px; margin-left: 10px; border-radius: 20px; cursor: pointer; }
+        </style>
+    </head>
+    <body>
+        <h1>Simple WebSocket Chat</h1>
+        <ul id='messages'></ul>
+        <form id="form" action="" onsubmit="sendMessage(event)">
+            <input type="text" id="messageText" autocomplete="off"/>
+            <button>Send</button>
+        </form>
+        <script>
+            // Use the client's hostname and port for the WebSocket connection
+            // This makes it work for both 'localhost' and your local IP
+            var ws = new WebSocket(`ws://${window.location.host}/ws`);
+            
+            ws.onmessage = function(event) {
+                var messages = document.getElementById('messages');
+                var message = document.createElement('li');
+                message.textContent = event.data;
+                
+                // For this simple example, we don't know who sent it,
+                // but you could add user identification
+                message.classList.add('message-other'); 
+                messages.appendChild(message);
+                messages.scrollTop = messages.scrollHeight; // Auto-scroll
+            };
+            
+            function sendMessage(event) {
+                var input = document.getElementById("messageText");
+                var messageText = input.value;
+                
+                // Add the message to our own list
+                var messages = document.getElementById('messages');
+                var message = document.createElement('li');
+                message.textContent = "You: " + messageText;
+                message.classList.add('message-self');
+                messages.appendChild(message);
+                messages.scrollTop = messages.scrollHeight; // Auto-scroll
+
+                // Send the message to the server
+                ws.send(messageText);
+                
+                input.value = ''; // Clear the input box
+                event.preventDefault(); // Don't reload the page
+            }
+        </script>
+    </body>
+</html>
