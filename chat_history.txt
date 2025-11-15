@@ -1,0 +1,3 @@
+{"sender": "Simon", "message": "What's up"}
+{"sender": "Apollo", "message": "Not much you"}
+{"sender": "Simon", "message": "Wanna go eat something"}

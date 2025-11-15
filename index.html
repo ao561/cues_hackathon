@@ -5,56 +5,128 @@
         <style>
             body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; }
             h1 { text-align: center; }
-            #messages { list-style-type: none; margin: 0; padding: 0 20px; overflow-y: auto; flex-grow: 1; }
-            #messages li { padding: 8px 12px; margin-bottom: 10px; border-radius: 8px; }
-            .message-self { background-color: #dcf8c6; align-self: flex-end; }
-            .message-other { background-color: #f1f0f0; align-self: flex-start; }
-            #form { display: flex; padding: 20px; background: #eee; }
-            #form input { border: 1px solid #ccc; padding: 10px; flex-grow: 1; border-radius: 20px; }
-            #form button { background: #007bff; color: white; border: none; padding: 10px 20px; margin-left: 10px; border-radius: 20px; cursor: pointer; }
+            
+            #messages { 
+                list-style-type: none; 
+                margin: 0; 
+                padding: 0 20px; 
+                overflow-y: auto; 
+                flex-grow: 1; 
+                display: flex;
+                flex-direction: column;
+            }
+            #messages li { 
+                padding: 8px 12px; 
+                margin-bottom: 10px; 
+                border-radius: 8px; 
+                max-width: 70%; /* Messages won't be full-width */
+            }
+            .message-self { 
+                background-color: #dcf8c6; 
+                align-self: flex-end; 
+            }
+            .message-other { 
+                background-color: #f1f0f0; 
+                align-self: flex-start; 
+            }
+            
+            /* --- NEW CSS FOR THE SENDER'S NAME --- */
+            .message-other strong {
+                display: block; /* Makes it take its own line */
+                font-size: 0.9em;
+                color: #555;
+                padding-bottom: 4px;
+                margin-bottom: 6px;
+                border-bottom: 1px solid #ddd; /* A nice little separator */
+            }
+
+            .form-container { display: flex; padding: 20px; background: #eee; }
+            .form-container input { border: 1px solid #ccc; padding: 10px; flex-grow: 1; border-radius: 20px; }
+            .form-container button { border: none; padding: 10px 20px; margin-left: 10px; border-radius: 20px; cursor: pointer; }
+
+            #name-form button { background: #28a745; color: white; }
+            #chat-form button { background: #007bff; color: white; }
+            .hidden { display: none; }
         </style>
     </head>
     <body>
         <h1>Simple WebSocket Chat</h1>
-        <ul id='messages'></ul>
-        <form id="form" action="" onsubmit="sendMessage(event)">
-            <input type="text" id="messageText" autocomplete="off"/>
-            <button>Send</button>
-        </form>
+
+        <div id="name-container" class="form-container">
+            <form id="name-form" onsubmit="joinChat(event)">
+                <input id="name-input" placeholder="Enter your name..." autocomplete="off"/>
+                <button>Join Chat</button>
+            </form>
+        </div>
+
+        <ul id='messages' class="hidden"></ul>
+        <div id="chat-container" class="form-container hidden">
+            <form id="chat-form" onsubmit="sendMessage(event)">
+                <input id="messageText" placeholder="Type a message..." autocomplete="off"/>
+                <button>Send</button>
+            </form>
+        </div>
+
         <script>
-            // Use the client's hostname and port for the WebSocket connection
-            // This makes it work for both 'localhost' and your local IP
-            var ws = new WebSocket(`ws://${window.location.host}/ws`);
-            
-            ws.onmessage = function(event) {
-                var messages = document.getElementById('messages');
-                var message = document.createElement('li');
-                message.textContent = event.data;
+            var ws;
+            var clientName;
+
+            function joinChat(event) {
+                event.preventDefault();
+                var nameInput = document.getElementById("name-input");
+                clientName = nameInput.value;
+                if (clientName.trim() === "") { return; }
+
+                document.getElementById("name-container").classList.add("hidden");
+                document.getElementById("messages").classList.remove("hidden");
+                document.getElementById("chat-container").classList.remove("hidden");
+
+                ws = new WebSocket(`ws://${window.location.host}/ws/${clientName}`);
                 
-                // For this simple example, we don't know who sent it,
-                // but you could add user identification
-                message.classList.add('message-other'); 
-                messages.appendChild(message);
-                messages.scrollTop = messages.scrollHeight; // Auto-scroll
-            };
-            
+                // --- THIS FUNCTION IS COMPLETELY REWRITTEN ---
+                ws.onmessage = function(event) {
+                    // Parse the incoming JSON string
+                    var data = JSON.parse(event.data); 
+                    
+                    var messages = document.getElementById('messages');
+                    var messageLi = document.createElement('li'); // The new <li> item
+
+                    if (data.sender === clientName) {
+                        // It's a message from me
+                        messageLi.classList.add('message-self');
+                        // Set text content directly (no name)
+                        messageLi.textContent = data.message;
+                    } else {
+                        // It's a message from someone else
+                        messageLi.classList.add('message-other');
+                        
+                        // Create the name element (e.g., <strong>Alice</strong>)
+                        var nameEl = document.createElement('strong');
+                        nameEl.textContent = data.sender;
+                        
+                        // Create the message element (e.g., <div>Hello</div>)
+                        var msgEl = document.createElement('div');
+                        msgEl.textContent = data.message;
+
+                        // Add the name *above* the message
+                        messageLi.appendChild(nameEl);
+                        messageLi.appendChild(msgEl);
+                    }
+                    
+                    messages.appendChild(messageLi);
+                    messages.scrollTop = messages.scrollHeight;
+                };
+            }
+
+            // This function is unchanged
             function sendMessage(event) {
+                event.preventDefault();
                 var input = document.getElementById("messageText");
                 var messageText = input.value;
+                if (messageText.trim() === "") { return; } // Don't send empty
                 
-                // Add the message to our own list
-                var messages = document.getElementById('messages');
-                var message = document.createElement('li');
-                message.textContent = "You: " + messageText;
-                message.classList.add('message-self');
-                messages.appendChild(message);
-                messages.scrollTop = messages.scrollHeight; // Auto-scroll
-
-                // Send the message to the server
                 ws.send(messageText);
-                
-                input.value = ''; // Clear the input box
-                event.preventDefault(); // Don't reload the page
+                input.value = '';
             }
         </script>
     </body>
