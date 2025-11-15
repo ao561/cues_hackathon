@@ -27,9 +27,12 @@ mcp = FastMCP("chat-monitor")
 
 # File paths
 CHAT_HISTORY = Path(__file__).parent / "chat_history.txt"
-PREPARED_RESPONSE_FILE = Path(__file__).parent / "prepared_response.json"
+PREPARED_RESPONSE_FILE = Path(__file__).parent / "prepared_response.txt"
 CONVERSATION_SUMMARY_FILE = Path(__file__).parent / ".conversation_summary.json"
 LAST_TRIGGER_LINE = Path(__file__).parent / ".last_trigger_line"
+
+# Trigger word
+TRIGGER_WORD = "@ai"
 
 # Anthropic setup
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -142,16 +145,9 @@ async def prepare_chat_response(response_text: str) -> str:
     with open(CHAT_HISTORY, 'r') as f:
         current_line = len(f.readlines())
     
-    # Save the prepared response
-    data = {
-        "response": response_text,
-        "timestamp": time.time(),
-        "triggered": True,
-        "ready_to_send": True
-    }
-    
+    # Save just the response text
     with open(PREPARED_RESPONSE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2)
+        f.write(response_text)
     
     # Update trigger line
     set_last_trigger_line(current_line)
@@ -182,14 +178,11 @@ async def create_conversation_summary(summary_text: str) -> str:
 
 
 @mcp.tool()
-async def check_for_trigger(trigger_word: str = "@ai") -> str:
-    """Check if a trigger word appears in recent unprocessed messages.
-    
-    Args:
-        trigger_word: The word to look for (default: "@ai")
+async def check_for_trigger() -> str:
+    """Check if @ai appears in recent unprocessed messages.
     
     Returns:
-        Information about whether trigger was found and how many new messages exist
+        Information about whether @ai was mentioned and how many new messages exist
     """
     if not CHAT_HISTORY.exists():
         return "No chat history found."
@@ -205,7 +198,7 @@ async def check_for_trigger(trigger_word: str = "@ai") -> str:
     if not new_lines:
         return "No new messages since last check."
     
-    # Check for trigger
+    # Check for @ai trigger
     triggered = False
     trigger_message = ""
     
@@ -213,7 +206,7 @@ async def check_for_trigger(trigger_word: str = "@ai") -> str:
         try:
             msg = json.loads(line.strip())
             message = msg.get("message", "")
-            if trigger_word.lower() in message.lower():
+            if TRIGGER_WORD.lower() in message.lower():
                 triggered = True
                 trigger_message = f"{msg.get('sender', 'Unknown')}: {message}"
                 break
@@ -223,7 +216,7 @@ async def check_for_trigger(trigger_word: str = "@ai") -> str:
     if triggered:
         return f"TRIGGER DETECTED!\nMessage: {trigger_message}\nNew messages: {len(new_lines)}\n\nUse get_recent_messages to see all messages and prepare a response."
     else:
-        return f"No trigger found. {len(new_lines)} new message(s) waiting."
+        return f"No @ai trigger found. {len(new_lines)} new message(s) waiting."
 
 
 @mcp.tool()
@@ -231,23 +224,19 @@ async def get_prepared_response() -> str:
     """Retrieve the currently prepared response if one exists.
     
     Returns:
-        The prepared response or a message if none exists
+        The prepared response text or a message if none exists
     """
     if not PREPARED_RESPONSE_FILE.exists():
         return "No prepared response found."
     
     try:
         with open(PREPARED_RESPONSE_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+            response = f.read()
         
-        response = data.get("response", "")
-        timestamp = data.get("timestamp", 0)
-        ready = data.get("ready_to_send", False)
+        if not response:
+            return "Response file is empty."
         
-        if not ready:
-            return "Response exists but is not marked as ready to send."
-        
-        return f"Prepared Response:\n{response}\n\nTimestamp: {timestamp}"
+        return f"Prepared Response:\n{response}"
     except Exception as e:
         return f"Error reading prepared response: {str(e)}"
 
