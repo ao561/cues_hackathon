@@ -893,14 +893,18 @@
             <div class="form-container">
                 <div>
                     <h2>Welcome to Chat</h2>
-                    <p>Enter your name to join the conversation</p>
+                    <p>Enter your details to join and connect your calendar</p>
                 </div>
                 <form id="name-form" onsubmit="joinChat(event)">
-                    <input id="name-input" placeholder="Your name..." autocomplete="off" maxlength="20" required/>
+                    <input id="name-input" placeholder="Your name..." autocomplete="off" maxlength="30" required/>
+                    <input id="email-input" type="email" placeholder="Your email (for calendar)..." autocomplete="email" required style="margin-top: 12px;"/>
                     <button type="submit">
-                        <span id="join-btn-text">Join Chat</span>
+                        <span id="join-btn-text">Join & Connect Calendar</span>
                         <span id="join-btn-spinner" class="loading-spinner hidden"></span>
                     </button>
+                    <p style="font-size: 12px; color: #65676b; margin-top: 12px; text-align: center;">
+                        We'll connect your Google Calendar to enable scheduling features
+                    </p>
                 </form>
             </div>
         </div>
@@ -917,7 +921,7 @@
                             <button id="theme-toggle" title="Toggle theme">🌙</button>
                         </div>
                     </div>
-                    <div style="font-size: 12px; color: #65676b;">
+                    <div style="font-size: 12px; color: #65676b; margin-bottom: 12px;">
                         <span id="user-count">0</span> users online
                     </div>
                 </div>
@@ -962,6 +966,7 @@
             var soundEnabled = true;
             var onlineUsers = new Set();
             var darkMode = false;
+            var calendarConnected = false;
 
             // Emoji list
             const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','👍','👎','👏','🙌','👋','🤝','🎉','🎊','❤️','💕','💖','✨','⭐','🌟','💫','🔥','💯'];
@@ -1175,90 +1180,111 @@
             }
 
             // Join chat
-            function joinChat(event) {
+            async function joinChat(event) {
                 event.preventDefault();
                 const nameInput = document.getElementById("name-input");
+                const emailInput = document.getElementById("email-input");
                 clientName = nameInput.value.trim();
-                if (clientName === "") { return; }
+                const userEmail = emailInput.value.trim();
+                
+                if (clientName === "" || userEmail === "") { return; }
 
                 // Show loading
                 document.getElementById('join-btn-text').classList.add('hidden');
                 document.getElementById('join-btn-spinner').classList.remove('hidden');
 
-                setTimeout(() => {
-                    document.getElementById("name-container").classList.add("hidden");
-                    document.getElementById("main-container").classList.remove("hidden");
+                // Register user with email
+                await fetch('/user/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: clientName, email: userEmail})
+                });
 
-                    ws = new WebSocket(`ws://${window.location.host}/ws/${clientName}`);
+                // MUST authenticate calendar before joining chat
+                showToast('Calendar Required', 'Please authorize calendar access to continue', 'info');
+                const calendarAuthorized = await waitForCalendarAuth(clientName);
+                
+                if (!calendarAuthorized) {
+                    // Reset if calendar not authorized
+                    document.getElementById('join-btn-text').classList.remove('hidden');
+                    document.getElementById('join-btn-spinner').classList.add('hidden');
+                    showToast('Access Required', 'Calendar access is required to join the chat', 'info');
+                    return;
+                }
+
+                // Only proceed to chat if calendar is authorized
+                document.getElementById("name-container").classList.add("hidden");
+                document.getElementById("main-container").classList.remove("hidden");
+
+                ws = new WebSocket(`ws://${window.location.host}/ws/${clientName}`);
+                
+                ws.onopen = function() {
+                    onlineUsers.add(clientName);
+                    updateOnlineUsers();
+                    showToast('Connected', 'You joined the chat with calendar access', 'success');
+                    playNotificationSound();
+                };
+                
+                ws.onmessage = function(event) {
+                    hideTypingIndicator();
                     
-                    ws.onopen = function() {
-                        onlineUsers.add(clientName);
+                    // Parse the incoming JSON string
+                    var data = JSON.parse(event.data);
+                    
+                    // Add sender to online users if not already there
+                    if (!onlineUsers.has(data.sender)) {
+                        onlineUsers.add(data.sender);
                         updateOnlineUsers();
-                        showToast('Connected', 'You joined the chat', 'success');
-                        playNotificationSound();
-                    };
-                    
-                    ws.onmessage = function(event) {
-                        hideTypingIndicator();
-                        
-                        // Parse the incoming JSON string
-                        var data = JSON.parse(event.data);
-                        
-                        // Add sender to online users if not already there
-                        if (!onlineUsers.has(data.sender)) {
-                            onlineUsers.add(data.sender);
-                            updateOnlineUsers();
-                            if (data.sender !== clientName) {
-                                showToast('User joined', `${data.sender} joined the chat`, 'info');
-                                playNotificationSound();
-                            }
-                        }
-                        
-                        var messages = document.getElementById('messages');
-                        var messageLi = document.createElement('li');
-                        messageLi.setAttribute('role', 'listitem');
-
-                        const timestamp = formatTime(new Date());
-
-                        if (data.sender === clientName) {
-                            // It's a message from me
-                            messageLi.classList.add('message-self');
-                            messageLi.innerHTML = `
-                                <div class="message-content">${escapeHtml(data.message)}</div>
-                                <div class="message-timestamp">${timestamp}</div>
-                            `;
-                        } else {
-                            // It's a message from someone else
-                            messageLi.classList.add('message-other');
-                            
-                            const avatarColor = getAvatarColor(data.sender);
-                            const initials = getInitials(data.sender);
-                            
-                            messageLi.innerHTML = `
-                                <div class="sender-info">
-                                    <div class="sender-avatar" style="background: ${avatarColor};">${initials}</div>
-                                    <span class="sender-name">${escapeHtml(data.sender)}</span>
-                                </div>
-                                <div class="message-content">${escapeHtml(data.message)}</div>
-                                <div class="message-timestamp">${timestamp}</div>
-                            `;
-                            
+                        if (data.sender !== clientName) {
+                            showToast('User joined', `${data.sender} joined the chat`, 'info');
                             playNotificationSound();
                         }
+                    }
+                    
+                    var messages = document.getElementById('messages');
+                    var messageLi = document.createElement('li');
+                    messageLi.setAttribute('role', 'listitem');
+
+                    const timestamp = formatTime(new Date());
+
+                    if (data.sender === clientName) {
+                        // It's a message from me
+                        messageLi.classList.add('message-self');
+                        messageLi.innerHTML = `
+                            <div class="message-content">${escapeHtml(data.message)}</div>
+                            <div class="message-timestamp">${timestamp}</div>
+                        `;
+                    } else {
+                        // It's a message from someone else
+                        messageLi.classList.add('message-other');
                         
-                        messages.appendChild(messageLi);
-                        messages.scrollTop = messages.scrollHeight;
-                    };
+                        const avatarColor = getAvatarColor(data.sender);
+                        const initials = getInitials(data.sender);
+                        
+                        messageLi.innerHTML = `
+                            <div class="sender-info">
+                                <div class="sender-avatar" style="background: ${avatarColor};">${initials}</div>
+                                <span class="sender-name">${escapeHtml(data.sender)}</span>
+                            </div>
+                            <div class="message-content">${escapeHtml(data.message)}</div>
+                            <div class="message-timestamp">${timestamp}</div>
+                        `;
+                        
+                        playNotificationSound();
+                    }
+                    
+                    messages.appendChild(messageLi);
+                    messages.scrollTop = messages.scrollHeight;
+                };
 
-                    ws.onclose = function() {
-                        showToast('Disconnected', 'Connection closed', 'info');
-                    };
+                ws.onclose = function() {
+                    showToast('Disconnected', 'Connection closed', 'info');
+                };
 
-                    ws.onerror = function(error) {
-                        showToast('Error', 'Connection error occurred', 'info');
-                        console.error('WebSocket error:', error);
-                    };
-                }, 500);
+                ws.onerror = function(error) {
+                    showToast('Error', 'Connection error occurred', 'info');
+                    console.error('WebSocket error:', error);
+                };
             }
 
             // Escape HTML to prevent XSS
@@ -1279,6 +1305,73 @@
                 input.value = '';
                 updateCharCounter();
                 hideTypingIndicator();
+            }
+
+            // Wait for calendar authorization (REQUIRED)
+            async function waitForCalendarAuth(username) {
+                return new Promise(async (resolve) => {
+                    try {
+                        const response = await fetch(`/auth/google-login/${username}`);
+                        const data = await response.json();
+                        
+                        // Open OAuth in popup
+                        const popup = window.open(data.auth_url, 'Google Calendar Auth', 'width=600,height=700');
+                        
+                        if (!popup) {
+                            showToast('Popup Blocked', 'Please allow popups to authorize calendar', 'info');
+                            resolve(false);
+                            return;
+                        }
+                        
+                        // Check for successful auth
+                        const checkAuth = setInterval(async () => {
+                            // Check if popup was closed without authorization
+                            if (popup.closed) {
+                                clearInterval(checkAuth);
+                                resolve(false);
+                                return;
+                            }
+                            
+                            try {
+                                const statusResponse = await fetch(`/auth/status/${username}`);
+                                const statusData = await statusResponse.json();
+                                
+                                if (statusData.authenticated) {
+                                    clearInterval(checkAuth);
+                                    if (popup && !popup.closed) {
+                                        popup.close();
+                                    }
+                                    calendarConnected = true;
+                                    updateCalendarUI(true);
+                                    resolve(true);
+                                }
+                            } catch (e) {
+                                // Ignore errors while checking
+                            }
+                        }, 1000);
+                        
+                        // Timeout after 3 minutes
+                        setTimeout(() => {
+                            clearInterval(checkAuth);
+                            if (popup && !popup.closed) {
+                                popup.close();
+                            }
+                            if (!calendarConnected) {
+                                resolve(false);
+                            }
+                        }, 180000);
+                        
+                    } catch (error) {
+                        console.error('Calendar auth error:', error);
+                        resolve(false);
+                    }
+                });
+            }
+
+            // Update calendar UI
+            function updateCalendarUI(connected) {
+                // Calendar status is always shown in sidebar now
+                // No button to update since it's mandatory
             }
 
             // Initialize
