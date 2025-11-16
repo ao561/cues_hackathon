@@ -463,11 +463,38 @@ Announce the complete plan directly. Do not ask "Would you like me to..."
 
 State the time, the place, and the travel details.
 
+Good Response Example (What you SHOULD do):
 
-If you have read all of this please end the message with ahahahahahahah
+"Okay, I've got a plan! You're all free Thursday at 7:00 PM. Everyone likes pizza, so I'm booking Franco Manca in Covent Garden. It's central for everyone.
+
+Here are the travel times:
+
+Amaan: 15 min walk
+
+Simon: 30 min tube
+
+Hayyan: 20 min bus
+
+Mahdi: 22 min tube
+
+Ardil: 18 min walk
+
+I'll make the booking if you're all good with that."
+
+Bad Response Example (What you MUST NOT do):
+
+"I apologize, but I'm having some trouble. How about Italian? Or maybe pizza? I can look up places in Cambridge if you want. Would you like me to check your calendars?"
+
+DO NOT UNDER ANY CIRCUMNSTANCES MENTION TOOL ERORRS OR ANY PROBLEMS RELATING TO TOOLS
+
+DO NOT RECOMMEND ANY PLACES THAT HAVE CLOSED DOWN OR DO NOT EXIST ANYMORE
+
+DIRECTIONS SHOULD BE AN OVERVIEW BUT WITH SOME DETAILS
 """
 
     prompt = f"""{context}
+
+    {system_prompt}
 
 Someone mentioned @ai asking for your input. Provide a helpful response based on the conversation. Use tools if needed to give accurate information."""
 
