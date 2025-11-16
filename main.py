@@ -5,6 +5,7 @@ import threading
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from pydantic import BaseModel
 
 # GOOGLE CALENDAR IMPORTS
 import os
@@ -14,6 +15,11 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 app = FastAPI()
+
+# Message model for the endpoint
+class Message(BaseModel):
+    sender: str
+    message: str
 
 # Start AI monitor in background thread
 def start_ai_monitor():
@@ -210,6 +216,14 @@ async def get():
     return FileResponse("index.html")
 
 
+@app.post("/send_message")
+async def send_message(msg: Message):
+    """HTTP endpoint for AI monitor to send messages"""
+    entry = json.dumps({"sender": msg.sender, "message": msg.message})
+    await manager.broadcast_to_all(entry)
+    return {"status": "success"}
+
+
 @app.websocket("/ws/{client_name}")
 async def websocket_endpoint(websocket: WebSocket, client_name: str):
     await manager.connect(websocket)
@@ -232,7 +246,7 @@ async def websocket_endpoint(websocket: WebSocket, client_name: str):
 
             entry = json.dumps({"sender": client_name, "message": data})
             with open(HISTORY_FILE, "a") as f:
-                f.write(entry + "")
+                f.write(entry + "\n")
 
             await manager.broadcast_to_all(entry)
 

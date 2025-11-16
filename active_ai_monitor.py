@@ -1,7 +1,7 @@
 """
 Active AI Chat Monitor - Runs alongside the FastAPI server
-Constantly monitors chat_history.txt and responds when @ai is mentioned
-Uses Gaussian weighting to prioritize recent messages over older ones
+Watches chat_history.txt for changes and responds when @ai is mentioned
+Sends responses directly to WebSocket with timeout handling
 """
 
 import json
@@ -11,7 +11,8 @@ from pathlib import Path
 from anthropic import Anthropic
 from dotenv import load_dotenv
 import os
-import math
+import httpx
+from watchfiles import awatch
 
 # Load environment
 load_dotenv()
@@ -23,34 +24,14 @@ LAST_PROCESSED_LINE = Path(__file__).parent / ".last_processed_line"
 
 # Anthropic setup
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20240620")
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-haiku-20241022")
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # Constants
 TRIGGER_WORD = "@ai"
-MAX_MESSAGES = 100
-CHECK_INTERVAL = 2  # seconds
-
-
-def gaussian_weight(position, total, sigma=0.3):
-    """
-    Calculate Gaussian weight for message importance.
-    Recent messages get higher weight, older messages get lower weight.
-    
-    position: index of message (0 = oldest, total-1 = newest)
-    total: total number of messages
-    sigma: controls how quickly importance drops off (smaller = more aggressive)
-    """
-    if total == 1:
-        return 1.0
-    
-    # Normalize position to [-1, 1] where 1 is most recent
-    normalized_pos = (2 * position / (total - 1)) - 1
-    
-    # Gaussian centered at 1 (most recent)
-    weight = math.exp(-((normalized_pos - 1) ** 2) / (2 * sigma ** 2))
-    
-    return weight
+MAX_MESSAGES = 50
+RESPONSE_TIMEOUT = 20  # seconds
+WEBSOCKET_ENDPOINT = "http://localhost:8000/send_message"
 
 
 def get_last_processed_line():
@@ -68,10 +49,10 @@ def set_last_processed_line(line_num):
     LAST_PROCESSED_LINE.write_text(str(line_num))
 
 
-def get_weighted_context(max_messages=MAX_MESSAGES):
+def get_recent_context(max_messages=MAX_MESSAGES):
     """
-    Get recent messages with Gaussian importance weighting.
-    Returns messages with their weights for context building.
+    Get last N messages regardless of when last processed.
+    This allows the AI to see consistent context even across multiple calls.
     """
     if not CHAT_HISTORY.exists():
         return []
@@ -79,18 +60,16 @@ def get_weighted_context(max_messages=MAX_MESSAGES):
     with open(CHAT_HISTORY, 'r', encoding='utf-8') as f:
         all_lines = f.readlines()
     
-    # Get last max_messages
+    # Always get last max_messages, not just since last trigger
     recent_lines = all_lines[-max_messages:] if len(all_lines) > max_messages else all_lines
     
     messages = []
-    for i, line in enumerate(recent_lines):
+    for line in recent_lines:
         try:
             msg = json.loads(line.strip())
-            weight = gaussian_weight(i, len(recent_lines))
             messages.append({
                 'sender': msg.get('sender', 'Unknown'),
-                'message': msg.get('message', ''),
-                'weight': weight
+                'message': msg.get('message', '')
             })
         except json.JSONDecodeError:
             continue
@@ -98,46 +77,23 @@ def get_weighted_context(max_messages=MAX_MESSAGES):
     return messages
 
 
-def build_context_prompt(weighted_messages):
+def build_context_prompt(messages):
     """
-    Build a context string emphasizing recent messages based on Gaussian weights.
+    Build a context string from messages.
     """
-    if not weighted_messages:
+    if not messages:
         return "No chat history available."
     
-    # Separate into high-weight (recent) and lower-weight (older) messages
-    high_weight_threshold = 0.6
-    
-    recent = []
-    older = []
-    
-    for msg in weighted_messages:
-        formatted = f"{msg['sender']}: {msg['message']}"
-        if msg['weight'] >= high_weight_threshold:
-            recent.append(formatted)
-        else:
-            older.append(formatted)
-    
-    context = ""
-    
-    # Recent messages (emphasized)
-    if recent:
-        context += "Recent conversation (high importance):\n"
-        context += "\n".join(recent)
-    
-    # Older messages (background context)
-    if older:
-        if recent:
-            context += "\n\n"
-        context += "Earlier messages (background context):\n"
-        context += "\n".join(older)
+    context = "Recent conversation:\n"
+    for msg in messages:
+        context += f"{msg['sender']}: {msg['message']}\n"
     
     return context
 
 
-async def generate_response(weighted_messages):
-    """Generate AI response using weighted context"""
-    context = build_context_prompt(weighted_messages)
+async def generate_response(messages):
+    """Generate AI response using context"""
+    context = build_context_prompt(messages)
     
     system_prompt = """You are a helpful AI assistant in a group chat. 
 
@@ -171,36 +127,60 @@ Someone mentioned @ai asking for your input. Provide a helpful, conversational r
         return None
 
 
+async def send_to_websocket(sender: str, message: str):
+    """Send a message to the WebSocket via HTTP endpoint"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WEBSOCKET_ENDPOINT,
+                json={"sender": sender, "message": message},
+                timeout=5.0
+            )
+            return response.status_code == 200
+    except Exception as e:
+        print(f"Error sending to WebSocket: {e}")
+        return False
+
+
 async def check_for_trigger():
-    """Check for @ai mentions in new messages"""
+    """Check if the most recent message contains @ai"""
     if not CHAT_HISTORY.exists():
+        print("[CHECK] Chat history file doesn't exist")
         return False, 0
     
     last_processed = get_last_processed_line()
+    print(f"[CHECK] Last processed line: {last_processed}")
     
     with open(CHAT_HISTORY, 'r', encoding='utf-8') as f:
         all_lines = f.readlines()
     
     current_line_count = len(all_lines)
+    print(f"[CHECK] Total lines: {current_line_count}")
     
-    # Check new messages
-    new_lines = all_lines[last_processed:]
-    
-    if not new_lines:
+    # If no new lines since last check, don't trigger
+    if current_line_count <= last_processed:
+        print(f"[CHECK] No new lines (current: {current_line_count}, last processed: {last_processed})")
         return False, current_line_count
     
-    # Check for trigger
-    for line in new_lines:
-        try:
-            msg = json.loads(line.strip())
-            message = msg.get('message', '')
-            if TRIGGER_WORD.lower() in message.lower():
-                return True, current_line_count
-        except json.JSONDecodeError:
-            continue
+    # Only check the last (newest) line for @ai trigger
+    last_line = all_lines[-1]
+    print(f"[CHECK] Checking last line: {last_line.strip()}")
     
-    # Update processed line even if no trigger
+    try:
+        msg = json.loads(last_line.strip())
+        message = msg.get('message', '')
+        
+        if TRIGGER_WORD.lower() in message.lower():
+            print(f"[CHECK] FOUND TRIGGER in: {message}")
+            # Update processed line so we don't trigger on same message again
+            set_last_processed_line(current_line_count)
+            return True, cursrent_line_count
+    except json.JSONDecodeError as e:
+        print(f"[CHECK] JSON decode error: {e}")
+    
+    # Update processed line
     set_last_processed_line(current_line_count)
+    print(f"[CHECK] No @ai trigger in last line")
     return False, current_line_count
 
 
@@ -212,52 +192,73 @@ async def save_response(response_text):
 
 
 async def monitor_loop():
-    """Main monitoring loop - runs continuously"""
+    """Main monitoring loop - watches file for changes"""
     print("=" * 60)
-    print("Active AI Chat Monitor Started")
+    print("Active AI Chat Monitor Started (File Watcher)")
     print(f"Monitoring: {CHAT_HISTORY}")
     print(f"Trigger: {TRIGGER_WORD}")
     print(f"Response file: {PREPARED_RESPONSE_FILE}")
-    print(f"Context: Last {MAX_MESSAGES} messages with Gaussian weighting")
-    print(f"Check interval: {CHECK_INTERVAL}s")
+    print(f"Context: Last {MAX_MESSAGES} messages")
+    print(f"Mode: Real-time file watching (instant detection)")
     print("=" * 60)
     print()
     
-    while True:
+    # Ensure the chat history file exists
+    if not CHAT_HISTORY.exists():
+        CHAT_HISTORY.touch()
+        print("[INIT] Created chat_history.txt")
+    
+    async for changes in awatch(CHAT_HISTORY):
         try:
-            # Check for trigger
+            print(f"[FILE CHANGE DETECTED] {changes}")
+            
+            # File was modified, check for trigger
             triggered, current_line = await check_for_trigger()
+            print(f"[CHECK RESULT] Triggered: {triggered}, Line: {current_line}")
             
             if triggered:
                 print(f"\n[TRIGGER DETECTED] @ai mentioned at line {current_line}")
                 
-                # Get weighted context
-                weighted_messages = get_weighted_context()
-                print(f"[CONTEXT] Loaded {len(weighted_messages)} messages with Gaussian weighting")
+                # Get recent context
+                recent_messages = get_recent_context()
+                print(f"[CONTEXT] Loaded {len(recent_messages)} recent messages")
                 
-                # Generate response
-                print("[GENERATING] Asking Claude for response...")
-                response = await generate_response(weighted_messages)
-                
-                if response:
-                    # Save response
-                    await save_response(response)
-                    print(f"[READY] Response saved and ready to send\n")
+                try:
+                    # Generate response with timeout
+                    print("[GENERATING] Asking Claude for response...")
+                    response = await asyncio.wait_for(
+                        generate_response(recent_messages),
+                        timeout=RESPONSE_TIMEOUT
+                    )
                     
-                    # Update processed line
-                    set_last_processed_line(current_line)
-                else:
-                    print("[ERROR] Failed to generate response\n")
-            
-            # Wait before next check
-            await asyncio.sleep(CHECK_INTERVAL)
+                    if response:
+                        print(f"[READY] Response generated: {response[:100]}...")
+                        
+                        # Send to WebSocket
+                        success = await send_to_websocket("AI Assistant", response)
+                        if success:
+                            print("[SUCCESS] Response sent to WebSocket\n")
+                        else:
+                            print("[ERROR] Failed to send response to WebSocket\n")
+                    else:
+                        print("[ERROR] Failed to generate response\n")
+                        
+                except asyncio.TimeoutError:
+                    print(f"[TIMEOUT] Response generation timed out after {RESPONSE_TIMEOUT} seconds")
+                    # Send timeout message to WebSocket
+                    await send_to_websocket(
+                        "AI Assistant", 
+                        "Response timeout - still processing, please wait..."
+                    )
+                    
+                except Exception as e:
+                    print(f"[ERROR] Exception during response generation: {e}\n")
             
         except KeyboardInterrupt:
             print("\n[STOPPED] AI monitor shut down")
             break
         except Exception as e:
             print(f"[ERROR] {e}")
-            await asyncio.sleep(CHECK_INTERVAL)
 
 
 if __name__ == "__main__":
