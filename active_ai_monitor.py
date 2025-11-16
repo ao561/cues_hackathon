@@ -2,17 +2,23 @@
 Active AI Chat Monitor - Runs alongside the FastAPI server
 Watches chat_history.txt for changes and responds when @ai is mentioned
 Sends responses directly to WebSocket with timeout handling
+Now with MCP tool integration!
 """
 
 import json
 import time
 import asyncio
+import datetime
 from pathlib import Path
 from anthropic import Anthropic
 from dotenv import load_dotenv
 import os
 import httpx
 from watchfiles import awatch
+
+# Import MCP tool functions
+import sys
+sys.path.append(str(Path(__file__).parent))
 
 # Load environment
 load_dotenv()
@@ -30,8 +36,211 @@ client = Anthropic(api_key=ANTHROPIC_API_KEY)
 # Constants
 TRIGGER_WORD = "@ai"
 MAX_MESSAGES = 50
-RESPONSE_TIMEOUT = 20  # seconds
+RESPONSE_TIMEOUT = 30  # seconds (increased for tool use)
 WEBSOCKET_ENDPOINT = "http://localhost:8000/send_message"
+
+# Tool definitions for Anthropic API
+TOOLS = [
+    {
+        "name": "check_availability",
+        "description": "Check calendar availability for a list of people. Shows if they are free or busy in the next few hours.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "people": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of person names (e.g., ['Simon', 'Mahdi', 'Amaan'])"
+                },
+                "hours_ahead": {
+                    "type": "integer",
+                    "description": "Number of hours to check ahead (default: 2)",
+                    "default": 2
+                }
+            },
+            "required": ["people"]
+        }
+    },
+    {
+        "name": "get_current_locations",
+        "description": "Get the current or upcoming location for each person based on their calendar events. Shows where people will be.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "people": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of person names"
+                },
+                "hours_ahead": {
+                    "type": "integer",
+                    "description": "Number of hours to check ahead (default: 2)",
+                    "default": 2
+                }
+            },
+            "required": ["people"]
+        }
+    },
+    {
+        "name": "find_common_free_time",
+        "description": "Find common free time slots when all specified people are available for a meetup.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "people": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of person names"
+                },
+                "hours_ahead": {
+                    "type": "integer",
+                    "description": "Number of hours to search (default: 8)",
+                    "default": 8
+                }
+            },
+            "required": ["people"]
+        }
+    },
+    {
+        "name": "find_restaurants",
+        "description": "Find restaurants near a specific location using coordinates.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "latitude": {
+                    "type": "number",
+                    "description": "Latitude of the location"
+                },
+                "longitude": {
+                    "type": "number",
+                    "description": "Longitude of the location"
+                },
+                "radius": {
+                    "type": "integer",
+                    "description": "Search radius in meters (default: 1500)",
+                    "default": 1500
+                },
+                "cuisine_type": {
+                    "type": "string",
+                    "description": "Optional cuisine filter (e.g., 'italian', 'chinese')"
+                }
+            },
+            "required": ["latitude", "longitude"]
+        }
+    },
+    {
+        "name": "find_restaurants_by_address",
+        "description": "Find restaurants near an address. Combines geocoding and restaurant search.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": "Address to search near (e.g., 'Trumpington Street, Cambridge')"
+                },
+                "radius": {
+                    "type": "integer",
+                    "description": "Search radius in meters (default: 1500)",
+                    "default": 1500
+                },
+                "cuisine_type": {
+                    "type": "string",
+                    "description": "Optional cuisine filter"
+                }
+            },
+            "required": ["address"]
+        }
+    },
+    {
+        "name": "analyze_food_preferences",
+        "description": "Analyze food preferences mentioned in the chat history to suggest restaurants based on what people like/dislike.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "geocode_address",
+        "description": "Convert an address to latitude/longitude coordinates. Useful for finding locations before searching for restaurants.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string",
+                    "description": "Address to geocode (e.g., 'Trumpington Street, Cambridge')"
+                }
+            },
+            "required": ["address"]
+        }
+    }
+]
+
+
+# Tool execution functions - these call the actual MCP implementations
+async def execute_tool(tool_name: str, tool_input: dict):
+    """Execute a tool and return the result"""
+    try:
+        if tool_name == "check_availability":
+            from calendar_server import check_availability
+            result = await check_availability(
+                people=tool_input["people"],
+                hours_ahead=tool_input.get("hours_ahead", 2)
+            )
+            return result
+        
+        elif tool_name == "get_current_locations":
+            from calendar_server import get_current_locations
+            result = await get_current_locations(
+                people=tool_input["people"],
+                hours_ahead=tool_input.get("hours_ahead", 2)
+            )
+            return result
+        
+        elif tool_name == "find_common_free_time":
+            from calendar_server import find_common_free_time
+            result = await find_common_free_time(
+                people=tool_input["people"],
+                hours_ahead=tool_input.get("hours_ahead", 8)
+            )
+            return result
+        
+        elif tool_name == "find_restaurants":
+            from location_server import find_restaurants
+            result = await find_restaurants(
+                latitude=tool_input["latitude"],
+                longitude=tool_input["longitude"],
+                radius=tool_input.get("radius", 1500),
+                cuisine_type=tool_input.get("cuisine_type")
+            )
+            return result
+        
+        elif tool_name == "find_restaurants_by_address":
+            from location_server import find_restaurants_by_address
+            result = await find_restaurants_by_address(
+                address=tool_input["address"],
+                radius=tool_input.get("radius", 1500),
+                cuisine_type=tool_input.get("cuisine_type")
+            )
+            return result
+        
+        elif tool_name == "analyze_food_preferences":
+            from location_server import analyze_food_preferences
+            result = await analyze_food_preferences()
+            return result
+        
+        elif tool_name == "geocode_address":
+            from location_server import geocode_address
+            result = await geocode_address(
+                address=tool_input["address"]
+            )
+            return result
+        
+        else:
+            return f"Unknown tool: {tool_name}"
+    
+    except Exception as e:
+        return f"Error executing {tool_name}: {str(e)}"
 
 
 def get_last_processed_line():
@@ -92,39 +301,105 @@ def build_context_prompt(messages):
 
 
 async def generate_response(messages):
-    """Generate AI response using context"""
+    """Generate AI response using context and tools"""
     context = build_context_prompt(messages)
     
-    system_prompt = """You are a helpful AI assistant in a group chat. 
+    system_prompt = """You are a helpful AI assistant in a group chat with access to tools.
 
 Key behaviors:
 - Be conversational and friendly
 - Keep responses concise (2-3 sentences max)
+- Use tools when relevant:
+  * Check calendars when people discuss meeting up
+  * Find restaurants when people discuss where to eat
+  * Check locations to help coordinate meetups
 - Respond directly to what people are discussing
-- If people are talking about food/restaurants, be helpful with suggestions
 - Don't be overly formal or verbose
 
-You've been mentioned with @ai, so provide a helpful response based on the conversation."""
+Available people for calendar/location queries: Amaan, Simon, Hayyan, Mahdi, Ardil
+
+You've been mentioned with @ai, so provide helpful responses and use tools when appropriate."""
 
     prompt = f"""{context}
 
-Someone mentioned @ai asking for your input. Provide a helpful, conversational response based on the recent discussion."""
+Someone mentioned @ai asking for your input. Provide a helpful response based on the conversation. Use tools if needed to give accurate information."""
 
     try:
+        # Initial API call with tools
+        conversation_messages = [{
+            "role": "user",
+            "content": prompt
+        }]
+        
         response = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=500,
+            max_tokens=1000,
             system=system_prompt,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
+            tools=TOOLS,
+            messages=conversation_messages
         )
         
-        return response.content[0].text
+        # Tool use loop
+        while response.stop_reason == "tool_use":
+            # Extract tool uses from response
+            tool_uses = [block for block in response.content if block.type == "tool_use"]
+            
+            # Notify user about tool usage
+            for tool_use in tool_uses:
+                tool_name = tool_use.name
+                tool_emoji = {
+                    "check_availability": "📅",
+                    "get_current_locations": "📍", 
+                    "find_common_free_time": "🕒",
+                    "find_restaurants": "🍽️",
+                    "find_restaurants_by_address": "🔍",
+                    "analyze_food_preferences": "🍕",
+                    "geocode_address": "🗺️"
+                }.get(tool_name, "🔧")
+                
+                notification = f"{tool_emoji} Using {tool_name.replace('_', ' ')}..."
+                await send_to_websocket("System", notification)
+                print(f"[TOOL USE] {tool_name} with input: {tool_use.input}")
+            
+            # Execute tools and build tool results
+            tool_results = []
+            for tool_use in tool_uses:
+                result = await execute_tool(tool_use.name, tool_use.input)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
+                    "content": str(result)
+                })
+            
+            # Add assistant's response and tool results to conversation
+            conversation_messages.append({
+                "role": "assistant",
+                "content": response.content
+            })
+            conversation_messages.append({
+                "role": "user",
+                "content": tool_results
+            })
+            
+            # Continue conversation with tool results
+            response = client.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=1000,
+                system=system_prompt,
+                tools=TOOLS,
+                messages=conversation_messages
+            )
+        
+        # Extract final text response
+        text_blocks = [block.text for block in response.content if hasattr(block, "text")]
+        return " ".join(text_blocks) if text_blocks else "I processed your request but couldn't generate a response."
+        
     except Exception as e:
         print(f"Error generating response: {e}")
+        import traceback
+        traceback.print_exc()
         return None
+
 
 
 async def send_to_websocket(sender: str, message: str):
