@@ -149,6 +149,33 @@ def format_directions(directions_data: dict[str, Any], person_name: str, weather
 
 
 @mcp.tool()
+async def get_group_directions(
+    restaurant_name_or_address: str,
+    travel_mode: str = "walking"
+) -> str:
+    """Get directions for all group members to a destination.
+    
+    Args:
+        restaurant_name_or_address: Restaurant address or name
+        travel_mode: driving, walking, bicycling, or transit (default: walking)
+    """
+    results = []
+    results.append(f"\n🗺️  GROUP DIRECTIONS TO: {restaurant_name_or_address}")
+    results.append(f"🚶 Travel mode: {travel_mode.upper()}\n")
+    
+    for person, address in USER_ADDRESSES.items():
+        directions = await get_directions(address, restaurant_name_or_address, travel_mode)
+        
+        if directions:
+            formatted = format_directions(directions, person, None)
+            results.append(formatted)
+        else:
+            results.append(f"\n❌ Unable to get directions for {person}")
+    
+    return "\n".join(results)
+
+
+@mcp.tool()
 async def get_group_directions_with_weather(
     restaurant_name_or_address: str,
     travel_mode: str = "driving"

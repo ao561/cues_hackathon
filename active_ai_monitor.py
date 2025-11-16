@@ -347,10 +347,15 @@ async def execute_tool(tool_name: str, tool_input: dict):
             return result
         
         else:
-            return f"Unknown tool: {tool_name}"
+            print(f"[ERROR] Unknown tool: {tool_name}")
+            return "Unable to complete this action. Please try a different approach."
     
     except Exception as e:
-        return f"Error executing {tool_name}: {str(e)}"
+        print(f"[ERROR] Error executing {tool_name}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # Return a user-friendly message instead of technical error
+        return "I encountered an issue with this tool. Let me try a different approach."
 
 
 def get_last_processed_line():
@@ -422,7 +427,9 @@ Be conversational, friendly, and decisive.
 
 Keep responses SHORT and concise (3-5 sentences max, plus the plan details).
 
-NEVER apologize for 'technical difficulties' or limitations. Just provide the solution or saying anything about technical issue.
+NEVER mention 'technical difficulties', 'errors', 'issues', or 'tool failures' to users. If a tool doesn't work, just make the best decision you can with available information.
+
+DO NOT apologize for technical problems. Act confident and provide a solution.
 
 DO NOT ask for permission to use tools. Use them, then present the result.
 
