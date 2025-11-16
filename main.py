@@ -7,13 +7,6 @@ from fastapi.responses import FileResponse
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from pydantic import BaseModel
 
-# GOOGLE CALENDAR IMPORTS
-import os
-import datetime
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-
 app = FastAPI()
 
 # Message model for the endpoint
@@ -36,9 +29,6 @@ async def startup_event():
     thread.start()
 HISTORY_FILE = "chat_history.txt"
 USER_PROFILES_FILE = "user_food_profiles.json"
-PERSONA_CALENDARS_FILE = "persona_calendars.json"
-SERVICE_ACCOUNT_FILE = "service_account.json"
-CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 analyzer = SentimentIntensityAnalyzer()
 
@@ -67,97 +57,6 @@ class ConnectionManager:
             await connection.send_text(message)
 
 manager = ConnectionManager()
-
-# ---------------- GOOGLE CALENDAR FIXED VERSION ----------------
-def get_calendar_service():
-    try:
-        creds = Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE,
-            scopes=CALENDAR_SCOPES
-        )
-        return build("calendar", "v3", credentials=creds)
-    except Exception as e:
-        print("Service account load error:", e)
-        return None
-
-
-def load_persona_calendars() -> dict:
-    try:
-        with open(PERSONA_CALENDARS_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
-
-
-async def query_availability(people_list: list[str]) -> dict:
-    service = get_calendar_service()
-    persona_map = load_persona_calendars()
-
-    if not service or not persona_map:
-        return {"error": "Could not load calendar service or persona map"}
-
-    calendar_ids_to_query = []
-    id_to_name = {}
-
-    for name, cal_id in persona_map.items():
-        if name.lower() in people_list:
-            if isinstance(cal_id, dict):
-                cal_id = list(cal_id.values())[0]
-            calendar_ids_to_query.append({"id": cal_id})
-            id_to_name[cal_id] = name
-
-    if not calendar_ids_to_query:
-        return {"error": "No valid people specified"}
-
-    time_min = datetime.datetime.utcnow().isoformat() + "Z"
-    time_max = (datetime.datetime.utcnow() + datetime.timedelta(hours=2)).isoformat() + "Z"
-
-    body = {
-        "timeMin": time_min,
-        "timeMax": time_max,
-        "timeZone": "UTC",
-        "items": calendar_ids_to_query
-    }
-
-    try:
-        result = service.freebusy().query(body=body).execute()
-        calendars = result.get("calendars", {})
-
-        availability = {}
-        for cal_id, data in calendars.items():
-            busy = data.get("busy", [])
-            name = id_to_name.get(cal_id, "Unknown")
-            if not busy:
-                availability[name] = "Available"
-            else:
-                start = busy[0]["start"].split("T")[1][:5]
-                availability[name] = f"Busy (Event at {start} UTC)"
-        return availability
-    except HttpError as e:
-        return {"error": str(e)}
-
-
-async def process_plan_request(manager: ConnectionManager):
-    persona_map = load_persona_calendars()
-    all_names = [name.lower() for name in persona_map.keys()]
-
-    if not all_names:
-        await manager.broadcast_to_all(json.dumps({
-            "sender": "Coordinator",
-            "message": "Cannot plan — no personas loaded"
-        }))
-        return
-
-    availability = await query_availability(all_names)
-
-    msg = "Checking availability for the next 2 hours..."
-    for name, status in availability.items():
-        msg += f"- {name}: {status}"
-
-    await manager.broadcast_to_all(json.dumps({
-        "sender": "Coordinator",
-        "message": msg
-    }))
 
 # ---------------- FOOD PROFILE LOGIC ----------------
 def update_food_profile(user: str, food: str, category: str):
@@ -239,10 +138,7 @@ async def websocket_endpoint(websocket: WebSocket, client_name: str):
     try:
         while True:
             data = await websocket.receive_text()
-            found_food = process_food_profile_update(client_name, data)
-
-            if not found_food and "plan" in data.lower():
-                await process_plan_request(manager)
+            process_food_profile_update(client_name, data)
 
             entry = json.dumps({"sender": client_name, "message": data})
             with open(HISTORY_FILE, "a") as f:

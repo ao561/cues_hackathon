@@ -148,38 +148,40 @@ async def check_for_trigger():
         print("[CHECK] Chat history file doesn't exist")
         return False, 0
     
-    last_processed = get_last_processed_line()
-    print(f"[CHECK] Last processed line: {last_processed}")
-    
     with open(CHAT_HISTORY, 'r', encoding='utf-8') as f:
         all_lines = f.readlines()
     
     current_line_count = len(all_lines)
     print(f"[CHECK] Total lines: {current_line_count}")
     
-    # If no new lines since last check, don't trigger
-    if current_line_count <= last_processed:
-        print(f"[CHECK] No new lines (current: {current_line_count}, last processed: {last_processed})")
+    # If no lines, don't trigger
+    if current_line_count == 0:
+        print(f"[CHECK] No lines in chat history")
         return False, current_line_count
     
     # Only check the last (newest) line for @ai trigger
     last_line = all_lines[-1]
     print(f"[CHECK] Checking last line: {last_line.strip()}")
     
+    last_processed = get_last_processed_line()
+    
     try:
         msg = json.loads(last_line.strip())
         message = msg.get('message', '')
         
         if TRIGGER_WORD.lower() in message.lower():
-            print(f"[CHECK] FOUND TRIGGER in: {message}")
-            # Update processed line so we don't trigger on same message again
-            set_last_processed_line(current_line_count)
-            return True, current_line_count
+            # Only trigger if we haven't processed this line number before
+            if current_line_count > last_processed:
+                print(f"[CHECK] FOUND TRIGGER in: {message}")
+                # Update processed line so we don't trigger on same message again
+                set_last_processed_line(current_line_count)
+                return True, current_line_count
+            else:
+                print(f"[CHECK] Already processed line {current_line_count}")
+                return False, current_line_count
     except json.JSONDecodeError as e:
         print(f"[CHECK] JSON decode error: {e}")
     
-    # Update processed line
-    set_last_processed_line(current_line_count)
     print(f"[CHECK] No @ai trigger in last line")
     return False, current_line_count
 
