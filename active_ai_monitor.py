@@ -205,6 +205,77 @@ TOOLS = [
             },
             "required": ["user"]
         }
+    },
+    {
+        "name": "get_current_weather",
+        "description": "Get current weather conditions for a location. Includes temperature, conditions, humidity, wind speed, and cycling suitability.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "City name or address (e.g., 'Cambridge, UK', 'London')"
+                }
+            },
+            "required": ["location"]
+        }
+    },
+    {
+        "name": "check_cycling_conditions",
+        "description": "Quick check if cycling conditions are suitable for a location based on weather.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "City name or address"
+                }
+            },
+            "required": ["location"]
+        }
+    },
+    {
+        "name": "get_group_directions_with_weather",
+        "description": "Get detailed directions for all group members to a destination, with weather-aware travel mode recommendations. Shows step-by-step directions for each person.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "restaurant_name_or_address": {
+                    "type": "string",
+                    "description": "Restaurant name or address to get directions to"
+                },
+                "travel_mode": {
+                    "type": "string",
+                    "description": "Travel mode: 'driving', 'walking', 'bicycling', or 'transit' (default: 'driving')",
+                    "enum": ["driving", "walking", "bicycling", "transit"],
+                    "default": "driving"
+                }
+            },
+            "required": ["restaurant_name_or_address"]
+        }
+    },
+    {
+        "name": "get_travel_time_summary",
+        "description": "Get a quick summary of travel times for all group members to a destination. Useful for comparing who's closest.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "restaurant_name_or_address": {
+                    "type": "string",
+                    "description": "Restaurant name or address"
+                }
+            },
+            "required": ["restaurant_name_or_address"]
+        }
+    },
+    {
+        "name": "list_group_members",
+        "description": "List all group members and their current addresses/locations.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
     }
 ]
 
@@ -283,6 +354,40 @@ async def execute_tool(tool_name: str, tool_input: dict):
             )
             return result
         
+        elif tool_name == "get_current_weather":
+            from weather_server import get_current_weather
+            result = await get_current_weather(
+                location=tool_input["location"]
+            )
+            return result
+        
+        elif tool_name == "check_cycling_conditions":
+            from weather_server import check_cycling_conditions
+            result = await check_cycling_conditions(
+                location=tool_input["location"]
+            )
+            return result
+        
+        elif tool_name == "get_group_directions_with_weather":
+            from directions_server import get_group_directions_with_weather
+            result = await get_group_directions_with_weather(
+                restaurant_name_or_address=tool_input["restaurant_name_or_address"],
+                travel_mode=tool_input.get("travel_mode", "driving")
+            )
+            return result
+        
+        elif tool_name == "get_travel_time_summary":
+            from directions_server import get_travel_time_summary
+            result = await get_travel_time_summary(
+                restaurant_name_or_address=tool_input["restaurant_name_or_address"]
+            )
+            return result
+        
+        elif tool_name == "list_group_members":
+            from directions_server import list_group_members
+            result = await list_group_members()
+            return result
+        
         else:
             return f"Unknown tool: {tool_name}"
     
@@ -351,21 +456,24 @@ async def generate_response(messages):
     """Generate AI response using context and tools"""
     context = build_context_prompt(messages)
     
-    system_prompt = """You are a helpful AI assistant in a group chat with access to tools.
+    system_prompt = """You are a helpful AI assistant in a group chat with access to powerful tools.
 
 Key behaviors:
 - Be conversational and friendly
 - Keep responses concise (2-3 sentences max)
-- Use tools when relevant:
+- Use tools proactively when relevant:
   * Check calendars when people discuss meeting up
   * Find restaurants when people discuss where to eat
-  * Check locations to help coordinate meetups
+  * Get weather conditions when planning outdoor activities or choosing travel mode
+  * Get directions and travel times when people need to coordinate meetups
+  * Check locations to help coordinate based on where people are
+  * Analyze food preferences to make personalized restaurant suggestions
 - Respond directly to what people are discussing
 - Don't be overly formal or verbose
 
-Available people for calendar/location queries: Amaan, Simon, Hayyan, Mahdi, Ardil
+Available people for calendar/location/directions queries: Amaan, Simon, Hayyan, Mahdi, Ardil
 
-You've been mentioned with @ai, so provide helpful responses and use tools when appropriate."""
+You've been mentioned with @ai, so provide helpful responses and use tools when appropriate to give accurate, contextual information."""
 
     prompt = f"""{context}
 
