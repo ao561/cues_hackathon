@@ -41,4 +41,3 @@
 {"sender": "Hayyan", "message": "Actually pizza is a safe choice"}
 {"sender": "Ardil", "message": "I would rather go for something slightly lighter coffee sounds good"}
 {"sender": "Ardil", "message": "I guess pizza would be nice"}
-{"sender": "Mahdi", "message": "coffee tastes hiorrble\ud83e\udd22"}
