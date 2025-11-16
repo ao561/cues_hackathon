@@ -468,27 +468,34 @@ Someone mentioned @ai asking for your input. Provide a helpful response based on
             # Extract tool uses from response
             tool_uses = [block for block in response.content if block.type == "tool_use"]
             
-            # Notify user about tool usage
+            # Create a single thinking message showing all tools being used
+            tool_descriptions = {
+                "check_availability": "Checking calendar availability",
+                "get_current_locations": "Getting current locations", 
+                "find_common_free_time": "Finding common free time",
+                "find_restaurants": "Finding restaurants",
+                "find_restaurants_by_address": "Searching for restaurants nearby",
+                "analyze_food_preferences": "Analyzing food preferences",
+                "geocode_address": "Looking up address",
+                "analyze_message_sentiment": "Understanding food preferences",
+                "get_user_food_preferences": "Retrieving saved preferences",
+                "get_group_directions": "Getting directions for everyone",
+                "get_travel_time_summary": "Calculating travel times",
+                "list_group_members": "Checking group members"
+            }
+            
+            # Build status message
+            if len(tool_uses) == 1:
+                status = tool_descriptions.get(tool_uses[0].name, "Processing")
+                thinking_msg = f"🤔 {status}..."
+            else:
+                status_items = [tool_descriptions.get(t.name, "Processing") for t in tool_uses]
+                thinking_msg = f"🤔 Working on this...\n• " + "\n• ".join(status_items)
+            
+            await send_to_websocket("AI Assistant", thinking_msg)
+            
             for tool_use in tool_uses:
-                tool_name = tool_use.name
-                tool_emoji = {
-                    "check_availability": "📅",
-                    "get_current_locations": "📍", 
-                    "find_common_free_time": "🕒",
-                    "find_restaurants": "🍽️",
-                    "find_restaurants_by_address": "🔍",
-                    "analyze_food_preferences": "🍕",
-                    "geocode_address": "🗺️",
-                    "analyze_message_sentiment": "😋",
-                    "get_user_food_preferences": "📝",
-                    "get_group_directions": "🗺️",
-                    "get_travel_time_summary": "⏱️",
-                    "list_group_members": "👥"
-                }.get(tool_name, "🔧")
-                
-                notification = f"{tool_emoji} Using {tool_name.replace('_', ' ')}..."
-                await send_to_websocket("System", notification)
-                print(f"[TOOL USE] {tool_name} with input: {tool_use.input}")
+                print(f"[TOOL USE] {tool_use.name} with input: {tool_use.input}")
             
             # Execute tools and build tool results
             tool_results = []
@@ -572,6 +579,12 @@ async def check_for_trigger():
     try:
         msg = json.loads(last_line.strip())
         message = msg.get('message', '')
+        sender = msg.get('sender', '')
+        
+        # Don't respond to AI's own messages
+        if sender == "AI Assistant":
+            print(f"[CHECK] Skipping AI Assistant's own message")
+            return False, current_line_count
         
         if TRIGGER_WORD.lower() in message.lower():
             # Only trigger if we haven't processed this line number before
