@@ -42,7 +42,13 @@
 {"sender": "Ardil", "message": "I would rather go for something slightly lighter coffee sounds good"}
 {"sender": "Ardil", "message": "I guess pizza would be nice"}
 {"sender": "Mahdi", "message": "coffee tastes hiorrble\ud83e\udd22"}
-{"sender": "Simon", "message": "@ai can you plan a dinner plan for us at 7pm tonight me, Mahdi and Amaan"}
-{"sender": "Simon", "message": "okay", "replyTo": {"sender": "Ardil", "message": "I would rather go for something slightly lighter coffee sounds good"}}
-{"sender": "Simon", "message": "@ai can you plan dinner with me mahdi and amaan for 9pm tonight please"}
-{"sender": "Ardil", "message": "hello guys"}
+{"sender": "Ardil", "message": "@ai can you help us decide ona location please."}
+{"sender": "System", "message": "\ud83c\udf55 Using analyze food preferences..."}
+{"sender": "System", "message": "\ud83d\udccd Using get current locations..."}
+{"sender": "System", "message": "\ud83c\udf55 Using analyze food preferences..."}
+{"sender": "System", "message": "\ud83d\udccd Using get current locations..."}
+{"sender": "System", "message": "\ud83d\udd0d Using find restaurants by address..."}
+{"sender": "System", "message": "\ud83d\udd52 Using find common free time..."}
+{"sender": "System", "message": "\ud83d\udd0d Using find restaurants by address..."}
+{"sender": "AI Assistant", "message": "Recommendation:\n\u2022 Location: A pizza restaurant in Cambridge\n\u2022 Time: Lunch or early dinner\n\u2022 Bonus: Get ice cream afterwards (as Amaan suggested)\n\nAction items:\n1. Confirm everyone's availability\n2. Choose a specific pizza place\n3. Plan for ice cream after lunch\n\nWould you like me to help you narrow down a specific pizza restaurant in Cambridge?"}
+{"sender": "AI Assistant", "message": "I apologize for the technical difficulties. Based on the conversation and available information, here's my recommendation:\n\nRecommendation: A pizza place in Cambridge that offers:\n- Variety of pizzas (including pineapple for Amaan)\n- Lighter options for Ardil\n- Potentially some curry-inspired toppings to satisfy Mahdi and Amaan\n- Option for coffee and ice cream afterwards\n\nSuggested next steps:\n1. Those in Cambridge (Amaan, Mahdi, Ardil) can meet up first\n2. Hayyan in London might join later or meet at a different location\n3. Simon at Birmingham might need to travel\n\nAdditional suggestions:\n- Consider a casual dining place with multiple food options\n- Plan for coffee and ice cream after the main meal\n- Coordinate timing based on everyone's current location\n\nWould you like me to help find a specific restaurant in Cambridge that meets these requirements? I can use the tools to search for a suitable location once you confirm the plan.\n\nWould you like me to:\n- Find a specific restaurant in Cambridge\n- Help coordinate travel for the group\n- Look for a place that accommodates everyone's dietary preferences"}
