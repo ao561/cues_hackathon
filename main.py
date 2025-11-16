@@ -1,5 +1,7 @@
 import uvicorn
 import json
+import asyncio
+import threading
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
@@ -12,6 +14,20 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 app = FastAPI()
+
+# Start AI monitor in background thread
+def start_ai_monitor():
+    """Start the AI monitor in a separate thread"""
+    import subprocess
+    import sys
+    subprocess.Popen([sys.executable, "active_ai_monitor.py"])
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the AI monitor when the server starts"""
+    print("Starting Active AI Monitor...")
+    thread = threading.Thread(target=start_ai_monitor, daemon=True)
+    thread.start()
 HISTORY_FILE = "chat_history.txt"
 USER_PROFILES_FILE = "user_food_profiles.json"
 PERSONA_CALENDARS_FILE = "persona_calendars.json"
