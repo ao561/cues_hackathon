@@ -239,12 +239,43 @@ async def websocket_endpoint(websocket: WebSocket, client_name: str):
     try:
         while True:
             data = await websocket.receive_text()
-            found_food = process_food_profile_update(client_name, data)
+            
+            # Try to parse as JSON to check for reply data
+            try:
+                message_data = json.loads(data)
+                if isinstance(message_data, dict) and "message" in message_data:
+                    # This is a structured message (possibly with reply)
+                    actual_message = message_data["message"]
+                    reply_to = message_data.get("replyTo")
+                    
+                    found_food = process_food_profile_update(client_name, actual_message)
 
-            if not found_food and "plan" in data.lower():
-                await process_plan_request(manager)
+                    if not found_food and "plan" in actual_message.lower():
+                        await process_plan_request(manager)
 
-            entry = json.dumps({"sender": client_name, "message": data})
+                    # Create entry with reply data
+                    entry = json.dumps({
+                        "sender": client_name, 
+                        "message": actual_message,
+                        "replyTo": reply_to
+                    })
+                else:
+                    # Plain string message
+                    found_food = process_food_profile_update(client_name, data)
+
+                    if not found_food and "plan" in data.lower():
+                        await process_plan_request(manager)
+
+                    entry = json.dumps({"sender": client_name, "message": data})
+            except json.JSONDecodeError:
+                # Plain string message
+                found_food = process_food_profile_update(client_name, data)
+
+                if not found_food and "plan" in data.lower():
+                    await process_plan_request(manager)
+
+                entry = json.dumps({"sender": client_name, "message": data})
+            
             with open(HISTORY_FILE, "a") as f:
                 f.write(entry + "\n")
 
