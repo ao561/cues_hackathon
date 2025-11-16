@@ -1,214 +1,265 @@
 """
-Auto Responder - Monitors chat for @ai and generates responses
-Run this in the background while your chat server is running
+Active AI Chat Monitor - Runs alongside the FastAPI server
+Watches chat_history.txt for changes and responds when @ai is mentioned
+Sends responses directly to WebSocket with timeout handling
 """
 
-import asyncio
 import json
-import os
 import time
+import asyncio
 from pathlib import Path
 from anthropic import Anthropic
 from dotenv import load_dotenv
+import os
+import httpx
+from watchfiles import awatch
 
 # Load environment
 load_dotenv()
 
 # File paths
-CHAT_HISTORY = Path("chat_history.txt")
-PREPARED_RESPONSE_FILE = Path("prepared_response.txt")
-LAST_TRIGGER_FILE = Path(".last_trigger_line")
-USER_PROFILES = Path("user_food_profiles.json")
+CHAT_HISTORY = Path(__file__).parent / "chat_history.txt"
+PREPARED_RESPONSE_FILE = Path(__file__).parent / "prepared_response.txt"
+LAST_PROCESSED_LINE = Path(__file__).parent / ".last_processed_line"
 
-# Config
-TRIGGER_WORD = "@ai"
-CHECK_INTERVAL = 1  # Check every 1 second
+# Anthropic setup
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-haiku-20241022")
+client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
-# Initialize Anthropic client
-client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+# Constants
+TRIGGER_WORD = "@ai"
+MAX_MESSAGES = 50
+RESPONSE_TIMEOUT = 20  # seconds
+WEBSOCKET_ENDPOINT = "http://localhost:8000/send_message"
 
 
-def get_last_trigger_line():
-    """Get the line number we last processed"""
-    if LAST_TRIGGER_FILE.exists():
+def get_last_processed_line():
+    """Get the last line number we processed"""
+    if LAST_PROCESSED_LINE.exists():
         try:
-            return int(LAST_TRIGGER_FILE.read_text().strip())
+            return int(LAST_PROCESSED_LINE.read_text().strip())
         except:
             return 0
     return 0
 
 
-def set_last_trigger_line(line_num):
-    """Save the line number we just processed"""
-    LAST_TRIGGER_FILE.write_text(str(line_num))
+def set_last_processed_line(line_num):
+    """Save the last line number we processed"""
+    LAST_PROCESSED_LINE.write_text(str(line_num))
 
 
-def get_user_profiles():
-    """Load user food profiles for context"""
-    if USER_PROFILES.exists():
-        try:
-            with open(USER_PROFILES, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-
-async def check_for_trigger():
-    """Check if @ai appears in new messages"""
+def get_recent_context(max_messages=MAX_MESSAGES):
+    """
+    Get last N messages regardless of when last processed.
+    This allows the AI to see consistent context even across multiple calls.
+    """
     if not CHAT_HISTORY.exists():
-        return None, None
-    
-    last_trigger = get_last_trigger_line()
+        return []
     
     with open(CHAT_HISTORY, 'r', encoding='utf-8') as f:
         all_lines = f.readlines()
     
-    # Get messages since last check
-    new_lines = all_lines[last_trigger:]
+    # Always get last max_messages, not just since last trigger
+    recent_lines = all_lines[-max_messages:] if len(all_lines) > max_messages else all_lines
     
-    if not new_lines:
-        return None, None
-    
-    # Check for @ai trigger
-    for i, line in enumerate(new_lines):
+    messages = []
+    for line in recent_lines:
         try:
             msg = json.loads(line.strip())
-            message = msg.get("message", "")
-            sender = msg.get("sender", "Unknown")
-            
-            if TRIGGER_WORD.lower() in message.lower():
-                # Found trigger! Return recent context
-                current_line = last_trigger + i + 1
-                
-                # Get last 20 messages for context
-                context_start = max(0, current_line - 20)
-                context_lines = all_lines[context_start:current_line + 1]
-                
-                return current_line, context_lines
+            messages.append({
+                'sender': msg.get('sender', 'Unknown'),
+                'message': msg.get('message', '')
+            })
         except json.JSONDecodeError:
             continue
     
-    # Update last checked line even if no trigger
-    set_last_trigger_line(len(all_lines))
-    return None, None
+    return messages
 
 
-async def generate_response(context_lines):
-    """Generate AI response using Claude"""
-    if not client:
-        print("❌ Error: ANTHROPIC_API_KEY not set")
-        return "Error: API key not configured"
+def build_context_prompt(messages):
+    """
+    Build a context string from messages.
+    """
+    if not messages:
+        return "No chat history available."
     
-    # Build conversation context
-    conversation = []
-    for line in context_lines:
-        try:
-            msg = json.loads(line.strip())
-            sender = msg.get("sender", "Unknown")
-            message = msg.get("message", "")
-            conversation.append(f"{sender}: {message}")
-        except:
-            continue
+    context = "Recent conversation:\n"
+    for msg in messages:
+        context += f"{msg['sender']}: {msg['message']}\n"
     
-    # Load user profiles for context
-    profiles = get_user_profiles()
-    profile_context = ""
-    if profiles:
-        profile_context = "\n\nUser Food Preferences:\n"
-        for user, prefs in profiles.items():
-            loved = prefs.get('loved', [])
-            disliked = prefs.get('dislike', []) + prefs.get('hated', [])
-            if loved or disliked:
-                profile_context += f"- {user}: "
-                if loved:
-                    profile_context += f"Loves {', '.join(loved)}. "
-                if disliked:
-                    profile_context += f"Dislikes {', '.join(disliked)}."
-                profile_context += "\n"
-    
-    # System prompt
-    system_prompt = f"""You are a helpful AI assistant in a group chat helping plan social activities.
+    return context
 
-Your role:
-- Help plan dinners, movies, hangouts
+
+async def generate_response(messages):
+    """Generate AI response using context"""
+    context = build_context_prompt(messages)
+    
+    system_prompt = """You are a helpful AI assistant in a group chat. 
+
+Key behaviors:
 - Be conversational and friendly
-- Consider user preferences when making suggestions
-- Be concise but helpful
+- Keep responses concise (2-3 sentences max)
+- Respond directly to what people are discussing
+- If people are talking about food/restaurants, be helpful with suggestions
+- Don't be overly formal or verbose
 
-Recent conversation:
-{chr(10).join(conversation)}
-{profile_context}
+You've been mentioned with @ai, so provide a helpful response based on the conversation."""
 
-Respond naturally to the most recent @ai mention."""
-    
+    prompt = f"""{context}
+
+Someone mentioned @ai asking for your input. Provide a helpful, conversational response based on the recent discussion."""
+
     try:
-        # Call Claude
         response = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=1024,
+            max_tokens=500,
+            system=system_prompt,
             messages=[{
                 "role": "user",
-                "content": "Based on the conversation above, provide a helpful response."
-            }],
-            system=system_prompt
+                "content": prompt
+            }]
         )
         
-        # Extract text
-        response_text = ""
-        for block in response.content:
-            if hasattr(block, 'text'):
-                response_text += block.text
-        
-        return response_text.strip()
-        
+        return response.content[0].text
     except Exception as e:
-        print(f"❌ Error calling Claude: {e}")
-        return f"Error generating response: {str(e)}"
+        print(f"Error generating response: {e}")
+        return None
 
 
-async def main():
-    """Main monitoring loop"""
-    print("🤖 Auto Responder Started")
-    print(f"   Monitoring: {CHAT_HISTORY}")
-    print(f"   Trigger: {TRIGGER_WORD}")
-    print(f"   Checking every {CHECK_INTERVAL} seconds")
-    print("   Press Ctrl+C to stop\n")
+async def send_to_websocket(sender: str, message: str):
+    """Send a message to the WebSocket via HTTP endpoint"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                WEBSOCKET_ENDPOINT,
+                json={"sender": sender, "message": message},
+                timeout=5.0
+            )
+            return response.status_code == 200
+    except Exception as e:
+        print(f"Error sending to WebSocket: {e}")
+        return False
+
+
+async def check_for_trigger():
+    """Check if the most recent message contains @ai"""
+    if not CHAT_HISTORY.exists():
+        print("[CHECK] Chat history file doesn't exist")
+        return False, 0
     
-    if not client:
-        print("❌ WARNING: ANTHROPIC_API_KEY not set in .env file!")
-        print("   Auto responder will not work without it.\n")
+    last_processed = get_last_processed_line()
+    print(f"[CHECK] Last processed line: {last_processed}")
+    
+    with open(CHAT_HISTORY, 'r', encoding='utf-8') as f:
+        all_lines = f.readlines()
+    
+    current_line_count = len(all_lines)
+    print(f"[CHECK] Total lines: {current_line_count}")
+    
+    # If no new lines since last check, don't trigger
+    if current_line_count <= last_processed:
+        print(f"[CHECK] No new lines (current: {current_line_count}, last processed: {last_processed})")
+        return False, current_line_count
+    
+    # Only check the last (newest) line for @ai trigger
+    last_line = all_lines[-1]
+    print(f"[CHECK] Checking last line: {last_line.strip()}")
     
     try:
-        while True:
-            # Check for trigger
-            trigger_line, context = await check_for_trigger()
+        msg = json.loads(last_line.strip())
+        message = msg.get('message', '')
+        
+        if TRIGGER_WORD.lower() in message.lower():
+            print(f"[CHECK] FOUND TRIGGER in: {message}")
+            # Update processed line so we don't trigger on same message again
+            set_last_processed_line(current_line_count)
+            return True, current_line_count
+    except json.JSONDecodeError as e:
+        print(f"[CHECK] JSON decode error: {e}")
+    
+    # Update processed line
+    set_last_processed_line(current_line_count)
+    print(f"[CHECK] No @ai trigger in last line")
+    return False, current_line_count
+
+
+async def save_response(response_text):
+    """Save the AI response for the output system"""
+    with open(PREPARED_RESPONSE_FILE, 'w', encoding='utf-8') as f:
+        f.write(response_text)
+    print(f"[SAVED] Response: {response_text[:100]}...")
+
+
+async def monitor_loop():
+    """Main monitoring loop - watches file for changes"""
+    print("=" * 60)
+    print("Active AI Chat Monitor Started (File Watcher)")
+    print(f"Monitoring: {CHAT_HISTORY}")
+    print(f"Trigger: {TRIGGER_WORD}")
+    print(f"Response file: {PREPARED_RESPONSE_FILE}")
+    print(f"Context: Last {MAX_MESSAGES} messages")
+    print(f"Mode: Real-time file watching (instant detection)")
+    print("=" * 60)
+    print()
+    
+    # Ensure the chat history file exists
+    if not CHAT_HISTORY.exists():
+        CHAT_HISTORY.touch()
+        print("[INIT] Created chat_history.txt")
+    
+    async for changes in awatch(CHAT_HISTORY):
+        try:
+            print(f"[FILE CHANGE DETECTED] {changes}")
             
-            if trigger_line and context:
-                print(f"\n🎯 Trigger detected at line {trigger_line}")
-                print("   Generating response...")
-                
-                # Generate response
-                response = await generate_response(context)
-                
-                # Save to file
-                with open(PREPARED_RESPONSE_FILE, 'w', encoding='utf-8') as f:
-                    f.write(response)
-                
-                print(f"   ✅ Response saved to {PREPARED_RESPONSE_FILE.name}")
-                print(f"   Preview: {response[:100]}...\n")
-                
-                # Update last processed line
-                set_last_trigger_line(trigger_line)
+            # File was modified, check for trigger
+            triggered, current_line = await check_for_trigger()
+            print(f"[CHECK RESULT] Triggered: {triggered}, Line: {current_line}")
             
-            # Wait before next check
-            await asyncio.sleep(CHECK_INTERVAL)
+            if triggered:
+                print(f"\n[TRIGGER DETECTED] @ai mentioned at line {current_line}")
+                
+                # Get recent context
+                recent_messages = get_recent_context()
+                print(f"[CONTEXT] Loaded {len(recent_messages)} recent messages")
+                
+                try:
+                    # Generate response with timeout
+                    print("[GENERATING] Asking Claude for response...")
+                    response = await asyncio.wait_for(
+                        generate_response(recent_messages),
+                        timeout=RESPONSE_TIMEOUT
+                    )
+                    
+                    if response:
+                        print(f"[READY] Response generated: {response[:100]}...")
+                        
+                        # Send to WebSocket
+                        success = await send_to_websocket("AI Assistant", response)
+                        if success:
+                            print("[SUCCESS] Response sent to WebSocket\n")
+                        else:
+                            print("[ERROR] Failed to send response to WebSocket\n")
+                    else:
+                        print("[ERROR] Failed to generate response\n")
+                        
+                except asyncio.TimeoutError:
+                    print(f"[TIMEOUT] Response generation timed out after {RESPONSE_TIMEOUT} seconds")
+                    # Send timeout message to WebSocket
+                    await send_to_websocket(
+                        "AI Assistant", 
+                        "Response timeout - still processing, please wait..."
+                    )
+                    
+                except Exception as e:
+                    print(f"[ERROR] Exception during response generation: {e}\n")
             
-    except KeyboardInterrupt:
-        print("\n\n👋 Auto Responder Stopped")
+        except KeyboardInterrupt:
+            print("\n[STOPPED] AI monitor shut down")
+            break
+        except Exception as e:
+            print(f"[ERROR] {e}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(monitor_loop())
