@@ -1,12 +1,44 @@
-{"sender": "Simon", "message": "Hello"}
-{"sender": "Mahdi", "message": "What's up!!"}
-{"sender": "Mahdi", "message": "I love ramen!"}
-{"sender": "Simon", "message": "I love ramen too!"}
-{"sender": "Amaan", "message": "I hate ramen, its the worst"}
-{"sender": "Hayyan", "message": "Hey guys!"}
-{"sender": "Hayyan", "message": "Sushi is alright"}
-{"sender": "Ardil", "message": "We should meet later!"}
-{"sender": "Ardil", "message": "Lets go eat soon"}
-{"sender": "Ardil", "message": "I kind of want pizza"}
-{"sender": "Simon", "message": "Plan getting food!"}
-{"sender": "Ardil", "message": "Sure where should we go?"}
+{"sender": "Mahdi", "message": "Good morning!"}
+{"sender": "Ardil", "message": "Good morning guys"}
+{"sender": "Hayyan", "message": "Hi guys how we doing!"}
+{"sender": "Amaan", "message": "Good morning"}
+{"sender": "Simon", "message": "Hey do you guys want to go get breakfast?"}
+{"sender": "Amaan", "message": "I'm doing good how about you"}
+{"sender": "Ardil", "message": "Im doing great just craving some cheesy pasta"}
+{"sender": "Amaan", "message": "I want some curry for breakfast"}
+{"sender": "Simon", "message": "Cheesy pasta for breakfast, are you mad?"}
+{"sender": "Hayyan", "message": "Bit early no ?"}
+{"sender": "Mahdi", "message": "oh cheeesy pasta sounds nice"}
+{"sender": "Ardil", "message": "Any other ideas?"}
+{"sender": "Simon", "message": "There's the new sushi place that I really want to try"}
+{"sender": "Amaan", "message": "pizza sounds good"}
+{"sender": "Hayyan", "message": "Maybe something lighter for breakfast"}
+{"sender": "Simon", "message": "Do you guys want to go get sushi?"}
+{"sender": "Amaan", "message": "I like pineapple on pizza"}
+{"sender": "Mahdi", "message": "no god no sushi"}
+{"sender": "Ardil", "message": "I really hate sushi"}
+{"sender": "Amaan", "message": "I dont like sushi"}
+{"sender": "Hayyan", "message": "Something like sushi?"}
+{"sender": "Hayyan", "message": "Oh :("}
+{"sender": "Simon", "message": "Sushi is so good though"}
+{"sender": "Mahdi", "message": "\ud83d\ude43"}
+{"sender": "Ardil", "message": "I think I would rather go for dinner and maybe get some steak"}
+{"sender": "Mahdi", "message": "I dont have money for steak"}
+{"sender": "Simon", "message": "Okay lets go dinner"}
+{"sender": "Hayyan", "message": "Facts we have to spend our 200$\ud83d\ude00"}
+{"sender": "Mahdi", "message": "how aboat we go for a curry place I know in Cambridge? its very nice"}
+{"sender": "Amaan", "message": "I'm in Cambridge too"}
+{"sender": "Hayyan", "message": "I'm in London right now though"}
+{"sender": "Ardil", "message": "I am currently in Cambridge"}
+{"sender": "Simon", "message": "Im currently in Birmingham New Street station"}
+{"sender": "Hayyan", "message": "What's the plan? Link up?"}
+{"sender": "Hayyan", "message": "Good food choices in London - you guys up for it? Got a good persian place"}
+{"sender": "Amaan", "message": "can we get ice cream after"}
+{"sender": "Amaan", "message": "I heard mahdi likes ice cream"}
+{"sender": "Hayyan", "message": "I'm feeling Rice and Kebab"}
+{"sender": "Mahdi", "message": "I do like ice cream, indeed."}
+{"sender": "Simon", "message": "Maybe coffee and ice cream I love them both"}
+{"sender": "Hayyan", "message": "Actually pizza is a safe choice"}
+{"sender": "Ardil", "message": "I would rather go for something slightly lighter coffee sounds good"}
+{"sender": "Ardil", "message": "I guess pizza would be nice"}
+{"sender": "Mahdi", "message": "coffee tastes hiorrble\ud83e\udd22"}
