@@ -87,63 +87,6 @@
                 color: var(--text-dark);
             }
 
-            /* Animated Particle Background */
-            body::before {
-                content: '';
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: 
-                    radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
-                    radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.1) 0%, transparent 50%),
-                    radial-gradient(circle at 40% 20%, rgba(255, 255, 255, 0.05) 0%, transparent 50%);
-                animation: particleFloat 20s ease-in-out infinite;
-                pointer-events: none;
-                z-index: 0;
-            }
-
-            @keyframes particleFloat {
-                0%, 100% {
-                    transform: translate(0, 0) scale(1);
-                    opacity: 1;
-                }
-                33% {
-                    transform: translate(30px, -30px) scale(1.1);
-                    opacity: 0.8;
-                }
-                66% {
-                    transform: translate(-20px, 20px) scale(0.9);
-                    opacity: 0.9;
-                }
-            }
-
-            /* Floating orbs */
-            body::after {
-                content: '';
-                position: fixed;
-                top: -50%;
-                left: -50%;
-                width: 200%;
-                height: 200%;
-                background: 
-                    radial-gradient(circle at 30% 40%, rgba(102, 126, 234, 0.15) 0%, transparent 25%),
-                    radial-gradient(circle at 70% 60%, rgba(118, 75, 162, 0.15) 0%, transparent 25%);
-                animation: orbRotate 30s linear infinite;
-                pointer-events: none;
-                z-index: 0;
-            }
-
-            @keyframes orbRotate {
-                0% {
-                    transform: rotate(0deg);
-                }
-                100% {
-                    transform: rotate(360deg);
-                }
-            }
-
             /* Header */
             #header {
                 background: white;
@@ -222,28 +165,6 @@
                 border-right-color: rgba(255, 255, 255, 0.1);
             }
 
-            /* Sidebar shine effect */
-            #sidebar::before {
-                content: '';
-                position: absolute;
-                top: -50%;
-                left: -50%;
-                width: 200%;
-                height: 200%;
-                background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.1) 50%, transparent 70%);
-                animation: sidebarShine 3s ease-in-out infinite;
-                pointer-events: none;
-            }
-
-            @keyframes sidebarShine {
-                0%, 100% {
-                    transform: translateX(-100%) translateY(-100%);
-                }
-                50% {
-                    transform: translateX(100%) translateY(100%);
-                }
-            }
-
             #sidebar-header {
                 padding: 20px;
                 border-bottom: 1px solid var(--border-light);
@@ -306,7 +227,7 @@
             .online-indicator {
                 width: 12px;
                 height: 12px;
-                background: var(--success-color);
+                background: var(--secondary-color); /* <-- This is the fix */
                 border: 2px solid white;
                 border-radius: 50%;
                 position: absolute;
@@ -1529,8 +1450,8 @@
             }
 
             .theme-option.active {
-                border-color: var(--primary-color);
-                background: rgba(0, 132, 255, 0.1);
+                border-color: var(--secondary-color);
+                background: rgba(0, 200, 81, 0.1); /* Transparent version of --secondary-color */
             }
 
             .theme-preview {
@@ -1563,24 +1484,6 @@
             .theme-name {
                 font-weight: 600;
                 font-size: 14px;
-            }
-
-            /* Confetti animation */
-            .confetti {
-                position: fixed;
-                width: 10px;
-                height: 10px;
-                background: var(--primary-color);
-                animation: confettiFall 3s linear forwards;
-                pointer-events: none;
-                z-index: 9999;
-            }
-
-            @keyframes confettiFall {
-                to {
-                    transform: translateY(100vh) rotate(720deg);
-                    opacity: 0;
-                }
             }
 
             /* Message grouping headers */
@@ -1654,13 +1557,11 @@
     <body>
         <div id="toast-container"></div>
 
-        <!-- Scroll to Bottom Button -->
         <button id="scroll-to-bottom" title="Scroll to bottom">
             ↓
             <span id="unread-badge">0</span>
         </button>
 
-        <!-- Theme Switcher Panel -->
         <div id="theme-switcher">
             <h3 style="margin-bottom: 8px; font-size: 16px;">Choose Theme</h3>
             <div class="theme-option active" data-theme="ocean">
@@ -1852,7 +1753,6 @@
                 option.onclick = function() {
                     const theme = this.getAttribute('data-theme');
                     switchTheme(theme);
-                    createConfetti();
                 };
             });
 
@@ -2168,7 +2068,6 @@
                     // MODIFIED: Simplified toast message
                     showToast('Connected', `You joined the chat as ${clientName}`, 'success');
                     playNotificationSound();
-                    createConfetti();
                 };
                 
                 ws.onmessage = function(event) {
@@ -2273,10 +2172,6 @@
                         
                         playNotificationSound();
                         
-                        // Confetti for mentions
-                        if (mentioned) {
-                            createConfetti();
-                        }
                     }
                     
                     messages.appendChild(messageLi);
@@ -2373,24 +2268,6 @@
 
             // MODIFIED: Removed waitForCalendarAuth function
             // MODIFIED: Removed updateCalendarUI function
-
-            // Confetti animation
-            function createConfetti() {
-                const colors = ['#667eea', '#764ba2', '#ff6b6b', '#feca57', '#1dd1a1', '#f368e0', '#48dbfb'];
-                for (let i = 0; i < 30; i++) {
-                    setTimeout(() => {
-                        const confetti = document.createElement('div');
-                        confetti.className = 'confetti';
-                        confetti.style.left = Math.random() * 100 + '%';
-                        confetti.style.background = colors[Math.floor(Math.random() * colors.length)];
-                        confetti.style.animationDelay = Math.random() * 0.5 + 's';
-                        confetti.style.animationDuration = (Math.random() * 2 + 2) + 's';
-                        document.body.appendChild(confetti);
-                        
-                        setTimeout(() => confetti.remove(), 3000);
-                    }, i * 30);
-                }
-            }
 
             // Scroll tracking for scroll-to-bottom button
             const messagesContainer = document.getElementById('messages');
