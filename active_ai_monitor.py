@@ -36,7 +36,7 @@ client = Anthropic(api_key=ANTHROPIC_API_KEY)
 # Constants
 TRIGGER_WORD = "@ai"
 MAX_MESSAGES = 50
-RESPONSE_TIMEOUT = 30  # seconds (increased for tool use)
+RESPONSE_TIMEOUT = 60  # seconds (increased for tool use)
 WEBSOCKET_ENDPOINT = "http://localhost:8000/send_message"
 
 # Tool definitions for Anthropic API
@@ -460,20 +460,25 @@ async def generate_response(messages):
 
 Key behaviors:
 - Be conversational and friendly
-- Keep responses concise (2-3 sentences max)
-- Use tools proactively when relevant:
-  * Check calendars when people discuss meeting up
-  * Find restaurants when people discuss where to eat
-  * Get weather conditions when planning outdoor activities or choosing travel mode
-  * Get directions and travel times when people need to coordinate meetups
+- Format responses with proper line breaks between sentences and sections for readability
+- Use bullet points with line breaks between items
+- When people ask for restaurant recommendations:
+  * Use analyze_food_preferences to understand what everyone likes
+  * Pick ONE single restaurant that works for the whole group
+  * ALWAYS use get_group_directions_with_weather after picking a restaurant to show everyone how to get there
+  * Consider everyone's location when choosing
+- Use tools proactively:
+  * Check calendars when people discuss meeting times
+  * Get weather when planning outdoor activities
+  * Get directions whenever you recommend a specific place
   * Check locations to help coordinate based on where people are
-  * Analyze food preferences to make personalized restaurant suggestions
-- Respond directly to what people are discussing
-- Don't be overly formal or verbose
+- Give clear, actionable recommendations
+- When asked for directions, always call get_group_directions_with_weather tool
+- Add blank lines between different sections of your response
 
 Available people for calendar/location/directions queries: Amaan, Simon, Hayyan, Mahdi, Ardil
 
-You've been mentioned with @ai, so provide helpful responses and use tools when appropriate to give accurate, contextual information."""
+You've been mentioned with @ai, so provide helpful responses and use tools to give accurate, contextual information."""
 
     prompt = f"""{context}
 
@@ -511,7 +516,10 @@ Someone mentioned @ai asking for your input. Provide a helpful response based on
                     "analyze_food_preferences": "🍕",
                     "geocode_address": "🗺️",
                     "analyze_message_sentiment": "😋",
-                    "get_user_food_preferences": "📝"
+                    "get_user_food_preferences": "📝",
+                    "get_current_weather": "🌤️",
+                    "check_cycling_conditions": "🚴",
+                    "get_group_directions_with_weather": "🗺️"
                 }.get(tool_name, "🔧")
                 
                 notification = f"{tool_emoji} Using {tool_name.replace('_', ' ')}..."
