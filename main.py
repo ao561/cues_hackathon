@@ -136,30 +136,6 @@ async def query_availability(people_list: list[str]) -> dict:
     except HttpError as e:
         return {"error": str(e)}
 
-
-async def process_plan_request(manager: ConnectionManager):
-    persona_map = load_persona_calendars()
-    all_names = [name.lower() for name in persona_map.keys()]
-
-    if not all_names:
-        await manager.broadcast_to_all(json.dumps({
-            "sender": "Coordinator",
-            "message": "Cannot plan — no personas loaded"
-        }))
-        return
-
-    availability = await query_availability(all_names)
-
-    msg = "Checking availability for the next 2 hours..."
-    for name, status in availability.items():
-        msg += f"- {name}: {status}"
-
-    await manager.broadcast_to_all(json.dumps({
-        "sender": "Coordinator",
-        "message": msg
-    }))
-
-# ---------------- FOOD PROFILE LOGIC ----------------
 def update_food_profile(user: str, food: str, category: str):
     try:
         with open(USER_PROFILES_FILE, "r") as f:
@@ -255,9 +231,6 @@ async def websocket_endpoint(websocket: WebSocket, client_name: str):
                     
                     found_food = process_food_profile_update(client_name, actual_message)
 
-                    if not found_food and "plan" in actual_message.lower():
-                        await process_plan_request(manager)
-
                     # Create entry with reply data
                     entry = json.dumps({
                         "sender": client_name, 
@@ -268,16 +241,10 @@ async def websocket_endpoint(websocket: WebSocket, client_name: str):
                     # Plain string message
                     found_food = process_food_profile_update(client_name, data)
 
-                    if not found_food and "plan" in data.lower():
-                        await process_plan_request(manager)
-
                     entry = json.dumps({"sender": client_name, "message": data})
             except json.JSONDecodeError:
                 # Plain string message
                 found_food = process_food_profile_update(client_name, data)
-
-                if not found_food and "plan" in data.lower():
-                    await process_plan_request(manager)
 
                 entry = json.dumps({"sender": client_name, "message": data})
             
