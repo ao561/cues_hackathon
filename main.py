@@ -220,6 +220,11 @@ async def get():
 async def send_message(msg: Message):
     """HTTP endpoint for AI monitor to send messages"""
     entry = json.dumps({"sender": msg.sender, "message": msg.message})
+    
+    # Save to chat history
+    with open(HISTORY_FILE, "a") as f:
+        f.write(entry + "\n")
+    
     await manager.broadcast_to_all(entry)
     return {"status": "success"}
 
