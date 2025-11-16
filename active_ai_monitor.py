@@ -173,6 +173,38 @@ TOOLS = [
             },
             "required": ["address"]
         }
+    },
+    {
+        "name": "analyze_message_sentiment",
+        "description": "Analyze a user's message for food mentions and sentiment. Automatically updates their food preferences. Use this when you notice people talking about food.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "user": {
+                    "type": "string",
+                    "description": "Name of the user who sent the message"
+                },
+                "message": {
+                    "type": "string",
+                    "description": "The message text to analyze"
+                }
+            },
+            "required": ["user", "message"]
+        }
+    },
+    {
+        "name": "get_user_food_preferences",
+        "description": "Get all saved food preferences for a specific user. Shows what they love, like, are neutral about, dislike, and hate.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "user": {
+                    "type": "string",
+                    "description": "Name of the user"
+                }
+            },
+            "required": ["user"]
+        }
     }
 ]
 
@@ -233,6 +265,21 @@ async def execute_tool(tool_name: str, tool_input: dict):
             from location_server import geocode_address
             result = await geocode_address(
                 address=tool_input["address"]
+            )
+            return result
+        
+        elif tool_name == "analyze_message_sentiment":
+            from sentiment_server import analyze_message_sentiment
+            result = await analyze_message_sentiment(
+                user=tool_input["user"],
+                message=tool_input["message"]
+            )
+            return result
+        
+        elif tool_name == "get_user_food_preferences":
+            from sentiment_server import get_user_preferences
+            result = await get_user_preferences(
+                user=tool_input["user"]
             )
             return result
         
@@ -354,7 +401,9 @@ Someone mentioned @ai asking for your input. Provide a helpful response based on
                     "find_restaurants": "🍽️",
                     "find_restaurants_by_address": "🔍",
                     "analyze_food_preferences": "🍕",
-                    "geocode_address": "🗺️"
+                    "geocode_address": "🗺️",
+                    "analyze_message_sentiment": "😋",
+                    "get_user_food_preferences": "📝"
                 }.get(tool_name, "🔧")
                 
                 notification = f"{tool_emoji} Using {tool_name.replace('_', ' ')}..."
@@ -485,57 +534,67 @@ async def monitor_loop():
         CHAT_HISTORY.touch()
         print("[INIT] Created chat_history.txt")
     
-    async for changes in awatch(CHAT_HISTORY):
-        try:
-            print(f"[FILE CHANGE DETECTED] {changes}")
-            
-            # File was modified, check for trigger
-            triggered, current_line = await check_for_trigger()
-            print(f"[CHECK RESULT] Triggered: {triggered}, Line: {current_line}")
-            
-            if triggered:
-                print(f"\n[TRIGGER DETECTED] @ai mentioned at line {current_line}")
+    try:
+        async for changes in awatch(CHAT_HISTORY):
+            try:
+                print(f"[FILE CHANGE DETECTED] {changes}")
                 
-                # Get recent context
-                recent_messages = get_recent_context()
-                print(f"[CONTEXT] Loaded {len(recent_messages)} recent messages")
+                # File was modified, check for trigger
+                triggered, current_line = await check_for_trigger()
+                print(f"[CHECK RESULT] Triggered: {triggered}, Line: {current_line}")
                 
-                try:
-                    # Generate response with timeout
-                    print("[GENERATING] Asking Claude for response...")
-                    response = await asyncio.wait_for(
-                        generate_response(recent_messages),
-                        timeout=RESPONSE_TIMEOUT
-                    )
+                if triggered:
+                    print(f"\n[TRIGGER DETECTED] @ai mentioned at line {current_line}")
                     
-                    if response:
-                        print(f"[READY] Response generated: {response[:100]}...")
+                    # Get recent context
+                    recent_messages = get_recent_context()
+                    print(f"[CONTEXT] Loaded {len(recent_messages)} recent messages")
+                    
+                    try:
+                        # Generate response with timeout
+                        print("[GENERATING] Asking Claude for response...")
+                        response = await asyncio.wait_for(
+                            generate_response(recent_messages),
+                            timeout=RESPONSE_TIMEOUT
+                        )
                         
-                        # Send to WebSocket
-                        success = await send_to_websocket("AI Assistant", response)
-                        if success:
-                            print("[SUCCESS] Response sent to WebSocket\n")
+                        if response:
+                            print(f"[READY] Response generated: {response[:100]}...")
+                            
+                            # Send to WebSocket
+                            success = await send_to_websocket("AI Assistant", response)
+                            if success:
+                                print("[SUCCESS] Response sent to WebSocket\n")
+                            else:
+                                print("[ERROR] Failed to send response to WebSocket\n")
                         else:
-                            print("[ERROR] Failed to send response to WebSocket\n")
-                    else:
-                        print("[ERROR] Failed to generate response\n")
+                            print("[ERROR] Failed to generate response\n")
+                            
+                    except asyncio.TimeoutError:
+                        print(f"[TIMEOUT] Response generation timed out after {RESPONSE_TIMEOUT} seconds")
+                        # Send timeout message to WebSocket
+                        await send_to_websocket(
+                            "AI Assistant", 
+                            "Response timeout - still processing, please wait..."
+                        )
                         
-                except asyncio.TimeoutError:
-                    print(f"[TIMEOUT] Response generation timed out after {RESPONSE_TIMEOUT} seconds")
-                    # Send timeout message to WebSocket
-                    await send_to_websocket(
-                        "AI Assistant", 
-                        "Response timeout - still processing, please wait..."
-                    )
-                    
-                except Exception as e:
-                    print(f"[ERROR] Exception during response generation: {e}\n")
-            
-        except KeyboardInterrupt:
-            print("\n[STOPPED] AI monitor shut down")
-            break
-        except Exception as e:
-            print(f"[ERROR] {e}")
+                    except Exception as e:
+                        print(f"[ERROR] Exception during response generation: {e}\n")
+                
+            except KeyboardInterrupt:
+                print("\n[STOPPED] AI monitor shut down")
+                break
+            except Exception as e:
+                print(f"[ERROR] Processing change: {e}")
+                
+    except KeyboardInterrupt:
+        print("\n[STOPPED] AI monitor shut down")
+    except Exception as e:
+        print(f"[ERROR] File watcher error: {e}")
+        print("[RESTART] Restarting file watcher in 2 seconds...")
+        await asyncio.sleep(2)
+        # Recursively restart the monitor
+        await monitor_loop()
 
 
 if __name__ == "__main__":

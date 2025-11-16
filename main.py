@@ -2,10 +2,14 @@ import uvicorn
 import json
 import asyncio
 import threading
+import sys
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from pydantic import BaseModel
+
+# Add parent directory to path for sentiment_server import
+sys.path.append(str(Path(__file__).parent))
 
 app = FastAPI()
 
@@ -27,16 +31,10 @@ async def startup_event():
     print("Starting Active AI Monitor...")
     thread = threading.Thread(target=start_ai_monitor, daemon=True)
     thread.start()
+
 HISTORY_FILE = "chat_history.txt"
-USER_PROFILES_FILE = "user_food_profiles.json"
 
-analyzer = SentimentIntensityAnalyzer()
-
-FOOD_KEYWORDS = {
-    "pizza", "pasta", "burger", "sushi", "salad", "steak",
-    "chicken", "fish", "tacos", "burrito", "ramen",
-    "curry", "soda", "coffee", "tea", "cake", "ice cream"
-}
+# Note: Food sentiment analysis is now handled by the AI using sentiment_server.py MCP
 
 class ConnectionManager:
     def __init__(self):
@@ -58,56 +56,8 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# ---------------- FOOD PROFILE LOGIC ----------------
-def update_food_profile(user: str, food: str, category: str):
-    try:
-        with open(USER_PROFILES_FILE, "r") as f:
-            db = json.load(f)
-    except:
-        db = {}
-
-    cats = ["loved", "liked", "neutral", "dislike", "hated"]
-
-    if user not in db:
-        db[user] = {c: [] for c in cats}
-
-    if food not in db[user][category]:
-        db[user][category].append(food)
-
-    for c in cats:
-        if c != category and food in db[user][c]:
-            db[user][c].remove(food)
-
-    with open(USER_PROFILES_FILE, "w") as f:
-        json.dump(db, f, indent=2)
-
-
-def process_food_profile_update(user: str, message: str):
-    lower = message.lower()
-    found = None
-    for word in lower.split():
-        w = word.strip('.,!?"')
-        if w in FOOD_KEYWORDS:
-            found = w
-            break
-
-    if found:
-        score = analyzer.polarity_scores(message)["compound"]
-        if score > 0.6:
-            cat = "loved"
-        elif score >= 0.05:
-            cat = "liked"
-        elif score <= -0.6:
-            cat = "hated"
-        elif score <= -0.05:
-            cat = "dislike"
-        else:
-            cat = "neutral"
-
-        update_food_profile(user, found, cat)
-        return True
-
-    return False
+# Note: Food profile updates are now handled intelligently by the AI
+# using sentiment_server.py MCP with Claude-based sentiment analysis
 
 # ---------------- WEBSOCKET HANDLER ----------------
 @app.get("/")
@@ -138,7 +88,13 @@ async def websocket_endpoint(websocket: WebSocket, client_name: str):
     try:
         while True:
             data = await websocket.receive_text()
-            process_food_profile_update(client_name, data)
+            
+            # Automatic food sentiment analysis on every message
+            try:
+                from sentiment_server import analyze_message_sentiment
+                await analyze_message_sentiment(client_name, data)
+            except Exception as e:
+                print(f"[Sentiment Analysis Error] {e}")
 
             entry = json.dumps({"sender": client_name, "message": data})
             with open(HISTORY_FILE, "a") as f:
