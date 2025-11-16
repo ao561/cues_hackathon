@@ -207,36 +207,8 @@ TOOLS = [
         }
     },
     {
-        "name": "get_current_weather",
-        "description": "Get current weather conditions for a location. Includes temperature, conditions, humidity, wind speed, and cycling suitability.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "City name or address (e.g., 'Cambridge, UK', 'London')"
-                }
-            },
-            "required": ["location"]
-        }
-    },
-    {
-        "name": "check_cycling_conditions",
-        "description": "Quick check if cycling conditions are suitable for a location based on weather.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "location": {
-                    "type": "string",
-                    "description": "City name or address"
-                }
-            },
-            "required": ["location"]
-        }
-    },
-    {
-        "name": "get_group_directions_with_weather",
-        "description": "Get detailed directions for all group members to a destination, with weather-aware travel mode recommendations. Shows step-by-step directions for each person.",
+        "name": "get_group_directions",
+        "description": "Get detailed directions for all group members to a destination. Shows step-by-step directions for each person.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -246,9 +218,9 @@ TOOLS = [
                 },
                 "travel_mode": {
                     "type": "string",
-                    "description": "Travel mode: 'driving', 'walking', 'bicycling', or 'transit' (default: 'driving')",
+                    "description": "Travel mode: 'driving', 'walking', 'bicycling', or 'transit' (default: 'walking')",
                     "enum": ["driving", "walking", "bicycling", "transit"],
-                    "default": "driving"
+                    "default": "walking"
                 }
             },
             "required": ["restaurant_name_or_address"]
@@ -354,25 +326,11 @@ async def execute_tool(tool_name: str, tool_input: dict):
             )
             return result
         
-        elif tool_name == "get_current_weather":
-            from weather_server import get_current_weather
-            result = await get_current_weather(
-                location=tool_input["location"]
-            )
-            return result
-        
-        elif tool_name == "check_cycling_conditions":
-            from weather_server import check_cycling_conditions
-            result = await check_cycling_conditions(
-                location=tool_input["location"]
-            )
-            return result
-        
-        elif tool_name == "get_group_directions_with_weather":
-            from directions_server import get_group_directions_with_weather
-            result = await get_group_directions_with_weather(
+        elif tool_name == "get_group_directions":
+            from directions_server import get_group_directions
+            result = await get_group_directions(
                 restaurant_name_or_address=tool_input["restaurant_name_or_address"],
-                travel_mode=tool_input.get("travel_mode", "driving")
+                travel_mode=tool_input.get("travel_mode", "walking")
             )
             return result
         
@@ -460,23 +418,29 @@ async def generate_response(messages):
 
 Key behaviors:
 - Be conversational and friendly
-- Format responses with proper line breaks between sentences and sections for readability
-- Use bullet points with line breaks between items
-- When people ask for restaurant recommendations:
-  * Use analyze_food_preferences to understand what everyone likes
-  * Pick ONE single restaurant that works for the whole group
-  * ALWAYS use get_group_directions_with_weather after picking a restaurant to show everyone how to get there
-  * Consider everyone's location when choosing
-- Use tools proactively:
-  * Check calendars when people discuss meeting times
-  * Get weather when planning outdoor activities
-  * Get directions whenever you recommend a specific place
-  * Check locations to help coordinate based on where people are
-- Give clear, actionable recommendations
-- When asked for directions, always call get_group_directions_with_weather tool
-- Add blank lines between different sections of your response
+- Keep responses SHORT and concise (3-5 sentences max)
+- Each bullet point MUST be on its own line with a line break before and after
+- Format all responses with proper spacing between sections
 
-Available people for calendar/location/directions queries: Amaan, Simon, Hayyan, Mahdi, Ardil
+When people ask for restaurant recommendations:
+  • Use analyze_food_preferences to understand what everyone likes
+  
+  • Pick ONE single restaurant that works for the whole group
+  
+  • ALWAYS use get_group_directions after picking a restaurant
+  
+  • Consider everyone's location when choosing
+
+Use tools proactively:
+  • Check calendars when people discuss meeting times
+  
+  • Get directions whenever you recommend a specific place
+  
+  • Check locations to help coordinate
+
+Give clear, actionable recommendations and always call get_group_directions when suggesting a place.
+
+Available people: Amaan, Simon, Hayyan, Mahdi, Ardil
 
 You've been mentioned with @ai, so provide helpful responses and use tools to give accurate, contextual information."""
 
@@ -517,9 +481,9 @@ Someone mentioned @ai asking for your input. Provide a helpful response based on
                     "geocode_address": "🗺️",
                     "analyze_message_sentiment": "😋",
                     "get_user_food_preferences": "📝",
-                    "get_current_weather": "🌤️",
-                    "check_cycling_conditions": "🚴",
-                    "get_group_directions_with_weather": "🗺️"
+                    "get_group_directions": "🗺️",
+                    "get_travel_time_summary": "⏱️",
+                    "list_group_members": "👥"
                 }.get(tool_name, "🔧")
                 
                 notification = f"{tool_emoji} Using {tool_name.replace('_', ' ')}..."
