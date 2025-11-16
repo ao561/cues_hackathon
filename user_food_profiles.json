@@ -38,10 +38,11 @@
   "Amaan": {
     "loved": [],
     "liked": [
-      "pizza",
+      "pizza"
+    ],
+    "neutral": [
       "curry"
     ],
-    "neutral": [],
     "dislike": [
       "fish",
       "sushi"
@@ -62,7 +63,8 @@
   },
   "Ardil": {
     "loved": [
-      "pasta"
+      "pasta",
+      "kebab"
     ],
     "liked": [
       "coffee",
