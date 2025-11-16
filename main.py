@@ -1,302 +1,52 @@
-# main.py
 import uvicorn
 import json
 import asyncio
-import os
-from pathlib import Path
+import threading
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from anthropic import Anthropic
-from dotenv import load_dotenv
+from pydantic import BaseModel
 
-# Load environment variables
-load_dotenv()
+# GOOGLE CALENDAR IMPORTS
+import os
+import datetime
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 app = FastAPI()
+
+# Message model for the endpoint
+class Message(BaseModel):
+    sender: str
+    message: str
+
+# Start AI monitor in background thread
+def start_ai_monitor():
+    """Start the AI monitor in a separate thread"""
+    import subprocess
+    import sys
+    subprocess.Popen([sys.executable, "active_ai_monitor.py"])
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the AI monitor when the server starts"""
+    print("Starting Active AI Monitor...")
+    thread = threading.Thread(target=start_ai_monitor, daemon=True)
+    thread.start()
 HISTORY_FILE = "chat_history.txt"
+USER_PROFILES_FILE = "user_food_profiles.json"
+PERSONA_CALENDARS_FILE = "persona_calendars.json"
+SERVICE_ACCOUNT_FILE = "service_account.json"
+CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+
 analyzer = SentimentIntensityAnalyzer()
 
-# Auto-responder configuration
-PREPARED_RESPONSE_FILE = Path("prepared_response.txt")
-LAST_TRIGGER_FILE = Path(".last_trigger_line")
-TRIGGER_WORD = "@ai"
-CHECK_INTERVAL = 1  # Check every 1 second
-
-# Anthropic client
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-CLAUDE_MODEL = "claude-3-haiku-20240307"  # Using Haiku - faster and cheaper
-claude_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
-
-# --- User profile database file ---
-USER_PROFILES_FILE = "user_food_profiles.json"
-
-# --- List of food items to track ---
 FOOD_KEYWORDS = {
     "pizza", "pasta", "burger", "sushi", "salad", "steak",
     "chicken", "fish", "tacos", "burrito", "ramen",
     "curry", "soda", "coffee", "tea", "cake", "ice cream"
 }
-
-def update_food_profile(user: str, food: str, category: str):
-    """
-    Updates the user profile JSON, moving the food item
-    to the new category.
-    """
-    try:
-        # Load the entire user profile database
-        with open(USER_PROFILES_FILE, "r") as f:
-            db = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        # Database is a dictionary of users
-        db = {}
-
-    # Define all possible categories
-    all_categories = ["loved", "liked", "neutral", "dislike", "hated"]
-    
-    # Get or create the profile for this user
-    if user not in db:
-        db[user] = {cat: [] for cat in all_categories}
-    
-    # 1. Add the food to the new category (if not already there)
-    if food not in db[user][category]:
-        db[user][category].append(food)
-        
-    # 2. Remove the food from all *other* categories
-    # (This handles a change of opinion)
-    for cat in all_categories:
-        if cat != category and food in db[user][cat]:
-            db[user][cat].remove(food)
-            
-    # Write the updated database back to the file
-    with open(USER_PROFILES_FILE, "w") as f:
-        json.dump(db, f, indent=2)
-
-
-def process_food_profile_update(user: str, message: str):
-    """
-    Checks for food, gets sentiment, and maps it
-    to one of five categories for the user's profile.
-    """
-    lower_msg = message.lower()
-    found_food = None
-    
-    for word in lower_msg.split():
-        clean_word = word.strip('.,!?"') 
-        if clean_word in FOOD_KEYWORDS:
-            found_food = clean_word
-            break 
-
-    if found_food:
-        # 1. Get VADER score
-        scores = analyzer.polarity_scores(message)
-        compound_score = scores['compound']
-        
-        # 2. Map score to one of the 5 categories
-        category = ""
-        if compound_score > 0.6:
-            category = "loved"
-        elif compound_score >= 0.05:
-            category = "liked"
-        elif compound_score <= -0.6:
-            category = "hated"
-        elif compound_score <= -0.05:
-            category = "dislike"
-        else:
-            category = "neutral"
-            
-        # 3. Save the result to the user's profile
-        update_food_profile(user, found_food, category)
-
-
-def get_last_trigger_line():
-    """Get the line number we last processed"""
-    if LAST_TRIGGER_FILE.exists():
-        try:
-            return int(LAST_TRIGGER_FILE.read_text().strip())
-        except:
-            return 0
-    return 0
-
-
-def set_last_trigger_line(line_num):
-    """Save the line number we just processed"""
-    LAST_TRIGGER_FILE.write_text(str(line_num))
-
-
-def get_user_profiles():
-    """Load user food profiles for context"""
-    try:
-        with open(USER_PROFILES_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return {}
-
-
-async def generate_ai_response(context_lines):
-    """Generate AI response using Claude"""
-    if not claude_client:
-        return "Error: AI not configured (missing API key)"
-    
-    # Build conversation context
-    conversation = []
-    for line in context_lines:
-        try:
-            msg = json.loads(line.strip())
-            sender = msg.get("sender", "Unknown")
-            message = msg.get("message", "")
-            conversation.append(f"{sender}: {message}")
-        except:
-            continue
-    
-    # Load user profiles for context
-    profiles = get_user_profiles()
-    profile_context = ""
-    if profiles:
-        profile_context = "\n\nUser Food Preferences:\n"
-        for user, prefs in profiles.items():
-            loved = prefs.get('loved', [])
-            disliked = prefs.get('dislike', []) + prefs.get('hated', [])
-            if loved or disliked:
-                profile_context += f"- {user}: "
-                if loved:
-                    profile_context += f"Loves {', '.join(loved)}. "
-                if disliked:
-                    profile_context += f"Dislikes {', '.join(disliked)}."
-                profile_context += "\n"
-    
-    # System prompt
-    system_prompt = f"""You are a helpful AI assistant in a group chat helping plan social activities.
-
-Your role:
-- Help plan dinners, movies, hangouts
-- Be conversational and friendly
-- Consider user preferences when making suggestions
-- Be concise but helpful (keep responses under 3 sentences unless asked for details)
-
-Recent conversation:
-{chr(10).join(conversation)}
-{profile_context}
-
-Respond naturally to the most recent @ai mention."""
-    
-    try:
-        # Call Claude
-        response = claude_client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=1024,
-            messages=[{
-                "role": "user",
-                "content": "Based on the conversation above, provide a helpful response."
-            }],
-            system=system_prompt
-        )
-        
-        # Extract text
-        response_text = ""
-        for block in response.content:
-            if hasattr(block, 'text'):
-                response_text += block.text
-        
-        return response_text.strip()
-        
-    except Exception as e:
-        print(f"❌ Error calling Claude: {e}")
-        return f"Sorry, I encountered an error: {str(e)}"
-
-
-async def check_for_ai_trigger():
-    """Check if @ai appears in new messages and generate response"""
-    try:
-        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-            all_lines = f.readlines()
-    except FileNotFoundError:
-        return None, None
-    
-    last_trigger = get_last_trigger_line()
-    new_lines = all_lines[last_trigger:]
-    
-    if not new_lines:
-        return None, None
-    
-    # Check for @ai trigger
-    for i, line in enumerate(new_lines):
-        try:
-            msg = json.loads(line.strip())
-            message = msg.get("message", "")
-            
-            if TRIGGER_WORD.lower() in message.lower():
-                # Found trigger!
-                current_line = last_trigger + i + 1
-                
-                # Get last 20 messages for context
-                context_start = max(0, current_line - 20)
-                context_lines = all_lines[context_start:current_line + 1]
-                
-                return current_line, context_lines
-        except json.JSONDecodeError:
-            continue
-    
-    # Update last checked line even if no trigger
-    set_last_trigger_line(len(all_lines))
-    return None, None
-
-
-async def auto_responder_loop():
-    """Background task that monitors for @ai and generates responses"""
-    print("🤖 Auto Responder Started")
-    print(f"   Monitoring: {HISTORY_FILE}")
-    print(f"   Trigger: {TRIGGER_WORD}")
-    
-    if not claude_client:
-        print("⚠️  WARNING: ANTHROPIC_API_KEY not set - AI responses will be disabled")
-    
-    while True:
-        try:
-            # Check for trigger
-            trigger_line, context = await check_for_ai_trigger()
-            
-            if trigger_line and context:
-                print(f"\n🎯 @ai trigger detected at line {trigger_line}")
-                print("   Generating AI response...")
-                
-                # Generate response
-                response = await generate_ai_response(context)
-                
-                # Save to file
-                with open(PREPARED_RESPONSE_FILE, 'w', encoding='utf-8') as f:
-                    f.write(response)
-                
-                print(f"   ✅ Response ready: {response[:80]}...")
-                
-                # Broadcast to all connected clients
-                message_data = {
-                    "sender": "AI Assistant",
-                    "message": response
-                }
-                message_json = json.dumps(message_data)
-                
-                # Save to history
-                with open(HISTORY_FILE, "a") as f:
-                    f.write(message_json + "\n")
-                
-                # Broadcast
-                await manager.broadcast_to_all(message_json)
-                
-                # Update last processed line
-                set_last_trigger_line(trigger_line)
-                
-                # Clean up response file
-                if PREPARED_RESPONSE_FILE.exists():
-                    PREPARED_RESPONSE_FILE.unlink()
-            
-            # Wait before next check
-            await asyncio.sleep(CHECK_INTERVAL)
-            
-        except Exception as e:
-            print(f"❌ Auto-responder error: {e}")
-            await asyncio.sleep(CHECK_INTERVAL)
-
 
 class ConnectionManager:
     def __init__(self):
@@ -318,53 +68,187 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# ---------------- GOOGLE CALENDAR FIXED VERSION ----------------
+def get_calendar_service():
+    try:
+        creds = Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE,
+            scopes=CALENDAR_SCOPES
+        )
+        return build("calendar", "v3", credentials=creds)
+    except Exception as e:
+        print("Service account load error:", e)
+        return None
 
-@app.on_event("startup")
-async def startup_event():
-    """Start the auto-responder background task when the app starts"""
-    asyncio.create_task(auto_responder_loop())
+
+def load_persona_calendars() -> dict:
+    try:
+        with open(PERSONA_CALENDARS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
 
 
+async def query_availability(people_list: list[str]) -> dict:
+    service = get_calendar_service()
+    persona_map = load_persona_calendars()
+
+    if not service or not persona_map:
+        return {"error": "Could not load calendar service or persona map"}
+
+    calendar_ids_to_query = []
+    id_to_name = {}
+
+    for name, cal_id in persona_map.items():
+        if name.lower() in people_list:
+            if isinstance(cal_id, dict):
+                cal_id = list(cal_id.values())[0]
+            calendar_ids_to_query.append({"id": cal_id})
+            id_to_name[cal_id] = name
+
+    if not calendar_ids_to_query:
+        return {"error": "No valid people specified"}
+
+    time_min = datetime.datetime.utcnow().isoformat() + "Z"
+    time_max = (datetime.datetime.utcnow() + datetime.timedelta(hours=2)).isoformat() + "Z"
+
+    body = {
+        "timeMin": time_min,
+        "timeMax": time_max,
+        "timeZone": "UTC",
+        "items": calendar_ids_to_query
+    }
+
+    try:
+        result = service.freebusy().query(body=body).execute()
+        calendars = result.get("calendars", {})
+
+        availability = {}
+        for cal_id, data in calendars.items():
+            busy = data.get("busy", [])
+            name = id_to_name.get(cal_id, "Unknown")
+            if not busy:
+                availability[name] = "Available"
+            else:
+                start = busy[0]["start"].split("T")[1][:5]
+                availability[name] = f"Busy (Event at {start} UTC)"
+        return availability
+    except HttpError as e:
+        return {"error": str(e)}
+
+
+async def process_plan_request(manager: ConnectionManager):
+    persona_map = load_persona_calendars()
+    all_names = [name.lower() for name in persona_map.keys()]
+
+    if not all_names:
+        await manager.broadcast_to_all(json.dumps({
+            "sender": "Coordinator",
+            "message": "Cannot plan — no personas loaded"
+        }))
+        return
+
+    availability = await query_availability(all_names)
+
+    msg = "Checking availability for the next 2 hours..."
+    for name, status in availability.items():
+        msg += f"- {name}: {status}"
+
+    await manager.broadcast_to_all(json.dumps({
+        "sender": "Coordinator",
+        "message": msg
+    }))
+
+# ---------------- FOOD PROFILE LOGIC ----------------
+def update_food_profile(user: str, food: str, category: str):
+    try:
+        with open(USER_PROFILES_FILE, "r") as f:
+            db = json.load(f)
+    except:
+        db = {}
+
+    cats = ["loved", "liked", "neutral", "dislike", "hated"]
+
+    if user not in db:
+        db[user] = {c: [] for c in cats}
+
+    if food not in db[user][category]:
+        db[user][category].append(food)
+
+    for c in cats:
+        if c != category and food in db[user][c]:
+            db[user][c].remove(food)
+
+    with open(USER_PROFILES_FILE, "w") as f:
+        json.dump(db, f, indent=2)
+
+
+def process_food_profile_update(user: str, message: str):
+    lower = message.lower()
+    found = None
+    for word in lower.split():
+        w = word.strip('.,!?"')
+        if w in FOOD_KEYWORDS:
+            found = w
+            break
+
+    if found:
+        score = analyzer.polarity_scores(message)["compound"]
+        if score > 0.6:
+            cat = "loved"
+        elif score >= 0.05:
+            cat = "liked"
+        elif score <= -0.6:
+            cat = "hated"
+        elif score <= -0.05:
+            cat = "dislike"
+        else:
+            cat = "neutral"
+
+        update_food_profile(user, found, cat)
+        return True
+
+    return False
+
+# ---------------- WEBSOCKET HANDLER ----------------
 @app.get("/")
 async def get():
     return FileResponse("index.html")
 
 
+@app.post("/send_message")
+async def send_message(msg: Message):
+    """HTTP endpoint for AI monitor to send messages"""
+    entry = json.dumps({"sender": msg.sender, "message": msg.message})
+    await manager.broadcast_to_all(entry)
+    return {"status": "success"}
+
+
 @app.websocket("/ws/{client_name}")
 async def websocket_endpoint(websocket: WebSocket, client_name: str):
     await manager.connect(websocket)
-    
-    # Send history to the connecting user
+
+    # Load history
     try:
         with open(HISTORY_FILE, "r") as f:
-            history = f.readlines()
-            for line in history:
-                # Send the raw JSON string from the history file
+            for line in f.readlines():
                 await manager.send_personal_message(line.strip(), websocket)
-    except FileNotFoundError:
-        pass 
-    
+    except:
+        pass
+
     try:
         while True:
             data = await websocket.receive_text()
-            
-            # Process the message for food preferences
-            process_food_profile_update(client_name, data)
-            
-            # Create a JSON object for the message
-            message_data = {
-                "sender": client_name,
-                "message": data
-            }
-            # Convert the Python dict to a JSON string
-            message_json = json.dumps(message_data)
-            
-            # Save the JSON string to history
+            found_food = process_food_profile_update(client_name, data)
+
+            if not found_food and "plan" in data.lower():
+                await process_plan_request(manager)
+
+            entry = json.dumps({"sender": client_name, "message": data})
             with open(HISTORY_FILE, "a") as f:
-                f.write(message_json + "\n")
-            
-            # Broadcast the JSON string
-            await manager.broadcast_to_all(message_json)
-            
+                f.write(entry + "\n")
+
+            await manager.broadcast_to_all(entry)
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
