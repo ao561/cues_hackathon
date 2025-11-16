@@ -885,29 +885,25 @@
         </style>
     </head>
     <body>
-        <!-- Toast Container -->
         <div id="toast-container"></div>
 
-        <!-- Name Entry Screen -->
         <div id="name-container">
             <div class="form-container">
                 <div>
                     <h2>Welcome to Chat</h2>
-                    <p>Enter your name to join the conversation</p>
+                    <p>Enter your name to join the chat</p>
                 </div>
                 <form id="name-form" onsubmit="joinChat(event)">
-                    <input id="name-input" placeholder="Your name..." autocomplete="off" maxlength="20" required/>
+                    <input id="name-input" placeholder="Your name..." autocomplete="off" maxlength="30" required/>
                     <button type="submit">
                         <span id="join-btn-text">Join Chat</span>
                         <span id="join-btn-spinner" class="loading-spinner hidden"></span>
                     </button>
-                </form>
+                    </form>
             </div>
         </div>
 
-        <!-- Main Chat Interface -->
         <div id="main-container" class="hidden">
-            <!-- Sidebar -->
             <div id="sidebar">
                 <div id="sidebar-header">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -917,14 +913,13 @@
                             <button id="theme-toggle" title="Toggle theme">🌙</button>
                         </div>
                     </div>
-                    <div style="font-size: 12px; color: #65676b;">
+                    <div style="font-size: 12px; color: #65676b; margin-bottom: 12px;">
                         <span id="user-count">0</span> users online
                     </div>
                 </div>
                 <ul id="online-users"></ul>
             </div>
 
-            <!-- Chat Area -->
             <div id="chat-area">
                 <ul id="messages" role="log" aria-live="polite" aria-label="Chat messages"></ul>
                 <div id="typing-indicator"></div>
@@ -962,6 +957,7 @@
             var soundEnabled = true;
             var onlineUsers = new Set();
             var darkMode = false;
+            // MODIFIED: Removed calendarConnected variable
 
             // Emoji list
             const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','👍','👎','👏','🙌','👋','🤝','🎉','🎊','❤️','💕','💖','✨','⭐','🌟','💫','🔥','💯'];
@@ -1175,90 +1171,90 @@
             }
 
             // Join chat
-            function joinChat(event) {
+            async function joinChat(event) {
                 event.preventDefault();
                 const nameInput = document.getElementById("name-input");
                 clientName = nameInput.value.trim();
+                
+                // MODIFIED: Simplified validation
                 if (clientName === "") { return; }
 
                 // Show loading
                 document.getElementById('join-btn-text').classList.add('hidden');
                 document.getElementById('join-btn-spinner').classList.remove('hidden');
 
-                setTimeout(() => {
-                    document.getElementById("name-container").classList.add("hidden");
-                    document.getElementById("main-container").classList.remove("hidden");
+                // MODIFIED: Removed all /user/register and waitForCalendarAuth logic
+                // We just proceed directly to the chat
+                
+                document.getElementById("name-container").classList.add("hidden");
+                document.getElementById("main-container").classList.remove("hidden");
 
-                    ws = new WebSocket(`ws://${window.location.host}/ws/${clientName}`);
+                ws = new WebSocket(`ws://${window.location.host}/ws/${clientName}`);
+                
+                ws.onopen = function() {
+                    onlineUsers.add(clientName);
+                    updateOnlineUsers();
+                    // MODIFIED: Simplified toast message
+                    showToast('Connected', `You joined the chat as ${clientName}`, 'success');
+                    playNotificationSound();
+                };
+                
+                ws.onmessage = function(event) {
+                    hideTypingIndicator();
                     
-                    ws.onopen = function() {
-                        onlineUsers.add(clientName);
+                    var data = JSON.parse(event.data);
+                    
+                    if (!onlineUsers.has(data.sender)) {
+                        onlineUsers.add(data.sender);
                         updateOnlineUsers();
-                        showToast('Connected', 'You joined the chat', 'success');
-                        playNotificationSound();
-                    };
-                    
-                    ws.onmessage = function(event) {
-                        hideTypingIndicator();
-                        
-                        // Parse the incoming JSON string
-                        var data = JSON.parse(event.data);
-                        
-                        // Add sender to online users if not already there
-                        if (!onlineUsers.has(data.sender)) {
-                            onlineUsers.add(data.sender);
-                            updateOnlineUsers();
-                            if (data.sender !== clientName) {
-                                showToast('User joined', `${data.sender} joined the chat`, 'info');
-                                playNotificationSound();
-                            }
-                        }
-                        
-                        var messages = document.getElementById('messages');
-                        var messageLi = document.createElement('li');
-                        messageLi.setAttribute('role', 'listitem');
-
-                        const timestamp = formatTime(new Date());
-
-                        if (data.sender === clientName) {
-                            // It's a message from me
-                            messageLi.classList.add('message-self');
-                            messageLi.innerHTML = `
-                                <div class="message-content">${escapeHtml(data.message)}</div>
-                                <div class="message-timestamp">${timestamp}</div>
-                            `;
-                        } else {
-                            // It's a message from someone else
-                            messageLi.classList.add('message-other');
-                            
-                            const avatarColor = getAvatarColor(data.sender);
-                            const initials = getInitials(data.sender);
-                            
-                            messageLi.innerHTML = `
-                                <div class="sender-info">
-                                    <div class="sender-avatar" style="background: ${avatarColor};">${initials}</div>
-                                    <span class="sender-name">${escapeHtml(data.sender)}</span>
-                                </div>
-                                <div class="message-content">${escapeHtml(data.message)}</div>
-                                <div class="message-timestamp">${timestamp}</div>
-                            `;
-                            
+                        if (data.sender !== clientName) {
+                            showToast('User joined', `${data.sender} joined the chat`, 'info');
                             playNotificationSound();
                         }
+                    }
+                    
+                    var messages = document.getElementById('messages');
+                    var messageLi = document.createElement('li');
+                    messageLi.setAttribute('role', 'listitem');
+
+                    const timestamp = formatTime(new Date());
+
+                    if (data.sender === clientName) {
+                        messageLi.classList.add('message-self');
+                        messageLi.innerHTML = `
+                            <div class="message-content">${escapeHtml(data.message)}</div>
+                            <div class="message-timestamp">${timestamp}</div>
+                        `;
+                    } else {
+                        messageLi.classList.add('message-other');
                         
-                        messages.appendChild(messageLi);
-                        messages.scrollTop = messages.scrollHeight;
-                    };
+                        const avatarColor = getAvatarColor(data.sender);
+                        const initials = getInitials(data.sender);
+                        
+                        messageLi.innerHTML = `
+                            <div class="sender-info">
+                                <div class="sender-avatar" style="background: ${avatarColor};">${initials}</div>
+                                <span class="sender-name">${escapeHtml(data.sender)}</span>
+                            </div>
+                            <div class="message-content">${escapeHtml(data.message)}</div>
+                            <div class="message-timestamp">${timestamp}</div>
+                        `;
+                        
+                        playNotificationSound();
+                    }
+                    
+                    messages.appendChild(messageLi);
+                    messages.scrollTop = messages.scrollHeight;
+                };
 
-                    ws.onclose = function() {
-                        showToast('Disconnected', 'Connection closed', 'info');
-                    };
+                ws.onclose = function() {
+                    showToast('Disconnected', 'Connection closed', 'info');
+                };
 
-                    ws.onerror = function(error) {
-                        showToast('Error', 'Connection error occurred', 'info');
-                        console.error('WebSocket error:', error);
-                    };
-                }, 500);
+                ws.onerror = function(error) {
+                    showToast('Error', 'Connection error occurred', 'info');
+                    console.error('WebSocket error:', error);
+                };
             }
 
             // Escape HTML to prevent XSS
@@ -1281,13 +1277,15 @@
                 hideTypingIndicator();
             }
 
+            // MODIFIED: Removed waitForCalendarAuth function
+            // MODIFIED: Removed updateCalendarUI function
+
             // Initialize
             initEmojiPicker();
             updateCharCounter();
 
             // Keyboard shortcuts
             document.addEventListener('keydown', function(e) {
-                // Ctrl/Cmd + K to focus message input
                 if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
                     e.preventDefault();
                     document.getElementById('messageText').focus();

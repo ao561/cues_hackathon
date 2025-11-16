@@ -1,8 +1,12 @@
-{"sender": "Simon", "message": "What's up"}
-{"sender": "Apollo", "message": "Not much you"}
-{"sender": "Simon", "message": "Wanna go eat something"}
-{"sender": "Simon", "message": "I love sushi"}
-{"sender": "Toby", "message": "I fucking hate sushi, it is the worst food ever created "}
-{"sender": "Simon", "message": "Pizza is alright"}
-{"sender": "Apollo", "message": "Steak is really good"}
-{"sender": "Jon", "message": "Anyone wanna go get some ramen, i would kill for some ramen rn"}
+{"sender": "Simon", "message": "Hello"}
+{"sender": "Mahdi", "message": "What's up!!"}
+{"sender": "Mahdi", "message": "I love ramen!"}
+{"sender": "Simon", "message": "I love ramen too!"}
+{"sender": "Amaan", "message": "I hate ramen, its the worst"}
+{"sender": "Hayyan", "message": "Hey guys!"}
+{"sender": "Hayyan", "message": "Sushi is alright"}
+{"sender": "Ardil", "message": "We should meet later!"}
+{"sender": "Ardil", "message": "Lets go eat soon"}
+{"sender": "Ardil", "message": "I kind of want pizza"}
+{"sender": "Simon", "message": "Plan getting food!"}
+{"sender": "Ardil", "message": "Sure where should we go?"}
