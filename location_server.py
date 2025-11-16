@@ -2,80 +2,73 @@
 # dependencies = [
 #   "mcp",
 #   "httpx",
+#   "python-dotenv",
 # ]
 # ///
 
 from typing import Any
 import httpx
 import json
+import os
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Initialize FastMCP server
 mcp = FastMCP("location")
 
 # Constants
-OVERPASS_API_BASE = "https://overpass-api.de/api/interpreter"
-NOMINATIM_BASE = "https://nominatim.openstreetmap.org"
-USER_AGENT = "cues-hackathon/1.0"
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+GOOGLE_PLACES_BASE = "https://maps.googleapis.com/maps/api/place"
+GOOGLE_GEOCODING_BASE = "https://maps.googleapis.com/maps/api/geocode/json"
 CHAT_HISTORY_FILE = Path(__file__).parent / "chat_history.txt"
 
 
-async def make_overpass_request(query: str) -> dict[str, Any] | None:
-    """Make a request to Overpass API."""
+async def make_google_places_request(url: str, params: dict) -> dict[str, Any] | None:
+    """Make a request to Google Places API."""
     try:
+        params["key"] = GOOGLE_MAPS_API_KEY
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                OVERPASS_API_BASE,
-                params={"data": query}
-            )
+            response = await client.get(url, params=params)
             response.raise_for_status()
             return response.json()
     except Exception as e:
-        print(f"Error making Overpass request: {e}")
+        print(f"Error making Google Places request: {e}")
         return None
 
 
-async def make_nominatim_request(url: str) -> dict[str, Any] | None:
-    """Make a request to Nominatim API."""
-    try:
-        headers = {"User-Agent": USER_AGENT}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            return response.json()
-    except Exception as e:
-        print(f"Error making Nominatim request: {e}")
-        return None
-
-
-def format_restaurant(element: dict[str, Any]) -> str:
-    """Format a restaurant element into a readable string."""
-    tags = element.get("tags", {})
-    name = tags.get("name", "Unknown Name")
-    cuisine = tags.get("cuisine", "Not specified")
+def format_restaurant(place: dict[str, Any]) -> str:
+    """Format a Google Places result into a readable string."""
+    name = place.get("name", "Unknown Name")
+    address = place.get("vicinity") or place.get("formatted_address", "Address not available")
+    rating = place.get("rating", "No rating")
+    user_ratings = place.get("user_ratings_total", 0)
+    price_level = "💰" * place.get("price_level", 0) if place.get("price_level") else "Price not available"
     
-    # OpenStreetMap doesn't have ratings, but may have other useful info
-    address = tags.get("addr:full") or tags.get("addr:street", "Address not available")
-    phone = tags.get("phone", "Phone not available")
-    website = tags.get("website", "Website not available")
-    opening_hours = tags.get("opening_hours", "Hours not available")
+    # Get cuisine types
+    types = place.get("types", [])
+    cuisine = ", ".join([t.replace("_", " ").title() for t in types if t != "restaurant" and t != "food" and t != "point_of_interest" and t != "establishment"])
+    if not cuisine:
+        cuisine = "Not specified"
+    
+    # Opening status
+    opening_now = "Open now" if place.get("opening_hours", {}).get("open_now") else "Closed"
     
     # Get coordinates
-    if "lat" in element and "lon" in element:
-        lat, lon = element["lat"], element["lon"]
-    elif "center" in element:
-        lat, lon = element["center"]["lat"], element["center"]["lon"]
-    else:
-        lat, lon = "N/A", "N/A"
+    location = place.get("geometry", {}).get("location", {})
+    lat = location.get("lat", "N/A")
+    lon = location.get("lng", "N/A")
     
     return f"""
 {name}
 Cuisine: {cuisine}
 Address: {address}
-Phone: {phone}
-Opening Hours: {opening_hours}
-Website: {website}
+Rating: {rating}/5 ({user_ratings} reviews)
+Price: {price_level}
+Status: {opening_now}
 Coordinates: {lat}, {lon}
 """
 
@@ -87,7 +80,7 @@ async def find_restaurants(
     radius: int = 1500,
     cuisine_type: str = None
 ) -> str:
-    """Find restaurants near a location.
+    """Find restaurants near a location using Google Places API.
 
     Args:
         latitude: Latitude of the location
@@ -95,72 +88,89 @@ async def find_restaurants(
         radius: Search radius in meters (default: 1500m, ~1 mile)
         cuisine_type: Optional cuisine filter (e.g., "italian", "chinese", "indian")
     """
-    # Build Overpass query
-    cuisine_filter = f'["cuisine"="{cuisine_type}"]' if cuisine_type else ""
+    if not GOOGLE_MAPS_API_KEY:
+        return "Google Maps API key not configured. Please set GOOGLE_MAPS_API_KEY in .env file."
     
-    query = f"""
-    [out:json][timeout:25];
-    (
-      node["amenity"="restaurant"]{cuisine_filter}(around:{radius},{latitude},{longitude});
-      way["amenity"="restaurant"]{cuisine_filter}(around:{radius},{latitude},{longitude});
-    );
-    out body center;
-    """
+    # Build request parameters
+    url = f"{GOOGLE_PLACES_BASE}/nearbysearch/json"
+    params = {
+        "location": f"{latitude},{longitude}",
+        "radius": radius,
+        "type": "restaurant"
+    }
     
-    data = await make_overpass_request(query)
+    # Add cuisine keyword if specified
+    if cuisine_type:
+        params["keyword"] = cuisine_type
     
-    if not data or "elements" not in data:
-        return "Unable to fetch restaurant data for this location."
+    data = await make_google_places_request(url, params)
     
-    if not data["elements"]:
+    if not data:
+        return "Unable to fetch restaurant data from Google Places."
+    
+    if data.get("status") != "OK":
+        return f"Error from Google Places API: {data.get('status')} - {data.get('error_message', 'Unknown error')}"
+    
+    results = data.get("results", [])
+    
+    if not results:
         cuisine_msg = f" with {cuisine_type} cuisine" if cuisine_type else ""
         return f"No restaurants found within {radius}m{cuisine_msg}."
     
-    # Format restaurants
-    restaurants = [format_restaurant(element) for element in data["elements"][:20]]  # Limit to 20
+    # Format restaurants (limit to top 20)
+    restaurants = [format_restaurant(place) for place in results[:20]]
     
-    header = f"Found {len(data['elements'])} restaurants within {radius}m:"
+    header = f"Found {len(results)} restaurants within {radius}m:"
     if cuisine_type:
-        header = f"Found {len(data['elements'])} {cuisine_type} restaurants within {radius}m:"
+        header = f"Found {len(results)} {cuisine_type} restaurants within {radius}m:"
     
     return header + "\n---\n".join(restaurants)
 
 
 @mcp.tool()
 async def geocode_address(address: str) -> str:
-    """Convert an address to latitude/longitude coordinates.
+    """Convert an address to latitude/longitude coordinates using Google Geocoding API.
 
     Args:
         address: Address to geocode (e.g., "10 Downing Street, London")
     """
-    url = f"{NOMINATIM_BASE}/search"
+    if not GOOGLE_MAPS_API_KEY:
+        return "Google Maps API key not configured. Please set GOOGLE_MAPS_API_KEY in .env file."
+    
     params = {
-        "q": address,
-        "format": "json",
-        "limit": 5
+        "address": address,
+        "key": GOOGLE_MAPS_API_KEY
     }
     
-    full_url = f"{url}?q={address}&format=json&limit=5"
-    data = await make_nominatim_request(full_url)
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(GOOGLE_GEOCODING_BASE, params=params)
+            response.raise_for_status()
+            data = response.json()
+    except Exception as e:
+        return f"Error geocoding address: {str(e)}"
     
-    if not data:
-        return "Unable to geocode this address."
+    if data.get("status") != "OK":
+        return f"Unable to geocode address: {data.get('status')}"
     
-    if not data:
+    results = data.get("results", [])
+    if not results:
         return f"No results found for address: {address}"
     
     # Format results
-    results = []
-    for i, location in enumerate(data, 1):
+    formatted_results = []
+    for i, location in enumerate(results[:5], 1):
+        geometry = location.get("geometry", {})
+        loc = geometry.get("location", {})
         result = f"""
 Result {i}:
-Address: {location.get('display_name', 'Unknown')}
-Coordinates: {location.get('lat', 'N/A')}, {location.get('lon', 'N/A')}
-Type: {location.get('type', 'Unknown')}
+Address: {location.get('formatted_address', 'Unknown')}
+Coordinates: {loc.get('lat', 'N/A')}, {loc.get('lng', 'N/A')}
+Type: {', '.join(location.get('types', ['Unknown']))}
 """
-        results.append(result)
+        formatted_results.append(result)
     
-    return "Geocoding results:\n---\n".join(results)
+    return "Geocoding results:\n---\n".join(formatted_results)
 
 
 @mcp.tool()
@@ -169,30 +179,47 @@ async def find_restaurants_by_address(
     radius: int = 1500,
     cuisine_type: str = None
 ) -> str:
-    """Find restaurants near an address (combines geocoding + restaurant search).
+    """Find restaurants near an address using Google Places API (combines geocoding + restaurant search).
 
     Args:
         address: Address to search near (e.g., "Oxford Street, London")
         radius: Search radius in meters (default: 1500m)
         cuisine_type: Optional cuisine filter (e.g., "italian", "chinese")
     """
-    # First geocode the address
-    url = f"{NOMINATIM_BASE}/search"
-    full_url = f"{url}?q={address}&format=json&limit=1"
-    data = await make_nominatim_request(full_url)
+    if not GOOGLE_MAPS_API_KEY:
+        return "Google Maps API key not configured. Please set GOOGLE_MAPS_API_KEY in .env file."
     
-    if not data or not data:
+    # First geocode the address
+    params = {
+        "address": address,
+        "key": GOOGLE_MAPS_API_KEY
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(GOOGLE_GEOCODING_BASE, params=params)
+            response.raise_for_status()
+            data = response.json()
+    except Exception as e:
+        return f"Error geocoding address: {str(e)}"
+    
+    if data.get("status") != "OK" or not data.get("results"):
         return f"Unable to find location for address: {address}"
     
     # Get coordinates from first result
-    location = data[0]
-    latitude = float(location["lat"])
-    longitude = float(location["lon"])
+    location = data["results"][0]
+    geometry = location.get("geometry", {})
+    loc = geometry.get("location", {})
+    latitude = loc.get("lat")
+    longitude = loc.get("lng")
+    
+    if not latitude or not longitude:
+        return f"Unable to get coordinates for address: {address}"
     
     # Now search for restaurants
     result = await find_restaurants(latitude, longitude, radius, cuisine_type)
     
-    header = f"Searching near: {location.get('display_name', address)}\n\n"
+    header = f"Searching near: {location.get('formatted_address', address)}\n\n"
     return header + result
 
 
